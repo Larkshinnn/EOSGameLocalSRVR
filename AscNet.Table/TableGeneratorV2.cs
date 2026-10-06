@@ -1,0 +1,136 @@
+﻿using Microsoft.CodeAnalysis;
+using System.Collections.Generic;
+using System.Linq;
+using System;
+using System.IO;
+using System.Globalization;
+// using Newtonsoft.Json;
+
+namespace AscNet.Table
+{
+    [Generator]
+    public class TableGeneratorV2 : ISourceGenerator
+    {
+        public void Execute(GeneratorExecutionContext context)
+        {
+            List<object> fails = new();
+            foreach (var table in context.AdditionalFiles.Where(x => x.Path.EndsWith(".tsv")))
+            {
+                try
+                {
+                    string ns = string.Join("", Path.GetDirectoryName(table.Path)?.Split(new string[] { "table" }, StringSplitOptions.None).Skip(1)!)
+                        .Replace('\\', '/').Replace('/', '.');
+
+                    string content = (table.GetText()?.ToString()) ?? throw new FormatException("File is empty!");
+                    List<string> lines = content.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries).ToList();
+
+                    List<MemberType> members = new();
+                    List<MemberType> membersRealCount = new();
+                    string headLine = lines.First();
+                    lines.RemoveAt(0);
+
+                    foreach (var head in headLine.Split('\t'))
+                    {
+                        string name = head.Split('[').First();
+                        MemberType? member = members.FirstOrDefault(x => x.Name == name);
+                        if (member == null)
+                        {
+                            member = new MemberType(name);
+                            members.Add(member);
+                        }
+                        // Indexed columns share inference so later cells can promote the element type.
+                        membersRealCount.Add(member);
+                    }
+
+                    for (int x = 0; x < lines.Count; x++)
+                    {
+                        string[] values = lines[x].Split('\t');
+
+                        for (int y = 0; y < values.Length; y++)
+                        {
+                            string value = values[y];
+                            MemberType memberType = membersRealCount[y];
+                            if (string.IsNullOrEmpty(value))
+                            {
+                                memberType.Nullable = true;
+                            }
+                            else
+                            {
+                                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+                                {
+                                    if (memberType.Type == null)
+                                        memberType.Type = typeof(int).FullName;
+                                }
+                                else if ((value.IndexOf('.') >= 0 || value.IndexOf('e') >= 0 || value.IndexOf('E') >= 0)
+                                    // Q32.32 authority uses unprefixed 16-digit hex words, including E-only words.
+                                    && !(value.Length == 16 && ulong.TryParse(value, NumberStyles.AllowHexSpecifier,
+                                        CultureInfo.InvariantCulture, out _))
+                                    && double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double number)
+                                    && !double.IsNaN(number) && !double.IsInfinity(number))
+                                {
+                                    if (memberType.Type != typeof(string).FullName)
+                                        memberType.Type = typeof(double).FullName;
+                                }
+                                else
+                                {
+                                    memberType.Type = typeof(string).FullName;
+                                }
+                            }
+                            membersRealCount[y] = memberType;
+                        }
+                    }
+
+                    string propDefs = string.Empty;
+                    foreach (MemberType memberType in membersRealCount.GroupBy(x => x.Name).Select(g => g.First()))
+                    {
+                        if (string.IsNullOrEmpty(memberType.Type) || string.IsNullOrEmpty(memberType.Name))
+                            continue;
+
+                        if (membersRealCount.Where(x => x.Name == memberType.Name).Count() > 1)
+                        {
+                            propDefs += $"public List<{memberType.Type}> {memberType.Name} {{ get; set; }}\r\n\t";
+                        }
+                        else
+                        {
+                            propDefs += $"public {memberType.Type + (memberType.Nullable ? "?" : string.Empty)} {memberType.Name} {{ get; set; }}\r\n\t";
+                        }
+                    }
+
+                    string file = $@"// <auto-generated/>
+namespace AscNet.Table.V2{ns}
+{{
+    #nullable enable
+    #pragma warning disable CS8618, CS8602 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
+    public class {Path.GetFileNameWithoutExtension(table.Path)}Table : global::AscNet.Common.Util.ITable
+    {{
+        public static string File => ""{string.Join("", table.Path.Replace("\\", "/").Split(new string[] { "/Resources/" }, StringSplitOptions.None).Skip(1))}"";
+
+        {propDefs}}}
+}}";
+                    
+                    context.AddSource($"V2{ns}.{Path.GetFileNameWithoutExtension(table.Path)}V2.g.cs", file);
+                }
+                catch (Exception ex)
+                {
+
+                    fails.Add(new
+                    {
+                        msg = ex.ToString(),
+                        file = table.Path
+                    });
+                }
+            }
+
+            // File.WriteAllText("./generator_fails_new.json", JsonConvert.SerializeObject(fails, Formatting.Indented));
+        }
+
+        public void Initialize(GeneratorInitializationContext context) { }
+
+        class MemberType(string name)
+        {
+            public string Name { get; } = name;
+            public string? Type { get; set; }
+            public bool Nullable { get; set; }
+        }
+    }
+}

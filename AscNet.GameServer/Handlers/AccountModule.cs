@@ -1,0 +1,1644 @@
+using AscNet.Common;
+using AscNet.Common.Database;
+using AscNet.GameServer.Game;
+using AscNet.Common.MsgPack;
+using AscNet.Common.Util;
+using AscNet.Table.V2.share.chat;
+using AscNet.Table.V2.share.exhibition;
+using AscNet.Table.V2.share.fashion;
+using AscNet.Table.V2.share.headportrait;
+using AscNet.Table.V2.client.functional;
+using AscNet.Table.V2.client.purchase;
+using AscNet.Table.V2.client.signin;
+using AscNet.Table.V2.share.bigworld.common.course;
+using AscNet.Table.V2.share.signin;
+using AscNet.Table.V2.share.fuben.bossinshot;
+using AscNet.Table.V2.share.fuben.fashionstory;
+using AscNet.Table.V2.share.fuben.transfinite;
+using AscNet.Table.V2.share.fuben.simulatetrain;
+using AscNet.Table.V2.share.miniactivity.dyemerge;
+using AscNet.Table.V2.share.miniactivity.hitmouse;
+using AscNet.Table.V2.share.theatre6;
+using AscNet.Table.V2.client.activitybrief;
+using AscNet.Table.V2.client.uimain;
+using AscNet.Table.V2.share.fuben.teaching;
+using AscNet.Table.V2.share.newactivitycalendar;
+using AscNet.Table.V2.share.photomode;
+using MessagePack;
+using AscNet.Table.V2.share.passport;
+using System.Diagnostics;
+using Newtonsoft.Json.Linq;
+
+namespace AscNet.GameServer.Handlers
+{
+    #region MsgPackScheme
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
+    [MessagePackObject(true)]
+    public class ForceLogoutNotify
+    {
+        public int Code;
+    }
+    
+    [MessagePackObject(true)]
+    public class ShutdownNotify
+    {
+    }
+
+    [MessagePackObject(true)]
+    public class SetServerBeanRequest
+    {
+        public string ServerBean;
+    }
+
+    [MessagePackObject(true)]
+    public class SetServerBeanResponse
+    {
+        public int Code;
+    }
+
+    [MessagePackObject(true)]
+    public class ClientVersionRequest
+    {
+        public string Version { get; set; } = string.Empty;
+    }
+
+    [MessagePackObject(true)]
+    public class ClientVersionResponse
+    {
+        public int Code { get; set; }
+        public string Version { get; set; } = string.Empty;
+        public bool KickOut { get; set; }
+    }
+
+    [MessagePackObject(true)]
+    public class NotifyChatBoardLoginData
+    {
+        public long CurrentChatBoardId { get; set; }
+        public List<NotifyChatBoardLoginDataChatBoard> ChatBoards { get; set; } = new();
+
+        [MessagePackObject(true)]
+        public class NotifyChatBoardLoginDataChatBoard
+        {
+            public long Id { get; set; }
+            public long GetTime { get; set; }
+            public long EndTime { get; set; }
+        }
+    }
+
+    [MessagePackObject(true)]
+    public class UseCdKeyRequest
+    {
+        public string Id;
+    }
+    
+    [MessagePackObject(true)]
+    public class UseCdKeyResponse
+    {
+        [MessagePackObject(true)]
+        public class CdKeyRewardGoods
+        {
+            public RewardType RewardType;
+            public int TemplateId;
+        }
+        
+        public int Code;
+        public List<CdKeyRewardGoods>? RewardGoods;
+    }
+    [MessagePackObject(true)]
+    public class SyncReadGameNoticeRequest
+    {
+        public List<RedPointGameNoticeInfo> GameNoticeInfos { get; set; } = new();
+    }
+
+    [MessagePackObject(true)]
+    public class SyncReadGameNoticeResponse
+    {
+        public int Code { get; set; }
+    }
+
+    [MessagePackObject(true)]
+    public class ChangeAssistCharIdRequest
+    {
+        public int AssistCharId { get; set; }
+    }
+
+    [MessagePackObject(true)]
+    public class ChangeAssistCharIdResponse
+    {
+        public int Code { get; set; }
+    }
+
+    [MessagePackObject(true)]
+    public class UnlockArchiveComicsRequest
+    {
+        public List<int> Ids { get; set; } = new();
+    }
+
+    [MessagePackObject(true)]
+    public class UnlockArchiveComicsResponse
+    {
+        public int Code { get; set; }
+        public List<int> SuccessIds { get; set; } = new();
+    }
+
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider declaring as nullable.
+    #endregion
+
+    internal partial class AccountModule
+    {
+        private static readonly Lazy<string> CurrentDocumentVersionValue = new(() =>
+        {
+            JObject versions = JsonSnapshot.LoadObject("Configs/version_config.json");
+            string latestVersion = versions.Properties()
+                .Where(property => Version.TryParse(property.Name, out _))
+                .MaxBy(property => Version.Parse(property.Name))?.Name
+                ?? throw new InvalidDataException("Configs/version_config.json: no application versions.");
+            return versions[latestVersion]?.Value<string>("DocumentVersion")
+                ?? throw new InvalidDataException($"Configs/version_config.json: {latestVersion} has no DocumentVersion.");
+        });
+        internal static string CurrentDocumentVersion => CurrentDocumentVersionValue.Value;
+        // The handshake document version is the client's own regional build (4.8.12 for every 4.8.0 region today);
+        // sessions that never handshook (or sent an empty one) get the shared EN default.
+        internal static string DocumentVersionFor(Session session) =>
+            string.IsNullOrEmpty(session.ClientDocumentVersion) ? CurrentDocumentVersion : session.ClientDocumentVersion;
+        private const long DefaultChatBoardId = 25000001;
+        private const int ChangeAssistCharIdRejectedCode = 20002006;
+
+
+        private static readonly long[] DefaultChatBoardIds =
+        [
+            25000001,
+            25000002,
+            25000003,
+            25000004,
+            25000008,
+            25000010
+        ];
+
+        private static readonly long[] DefaultCommunicationIds =
+        [
+            101, 102, 103, 104, 1, 105, 2, 3, 111, 106, 4, 5, 107, 108, 6, 7, 8, 9, 109,
+            10, 11, 112, 12, 110, 14, 19, 25, 18, 20, 22, 24, 555, 21, 23, 599, 600,
+            3108, 4108, 557, 558, 601, 602, 603, 604, 605, 556, 606, 607, 608, 609
+        ];
+
+
+        [RequestPacketHandler("HandshakeRequest")]
+        public static void HandshakeRequestHandler(Session session, Packet.Request packet)
+        {
+            HandshakeRequest request = packet.Deserialize<HandshakeRequest>();
+            session.ClientDocumentVersion = request.DocumentVersion;
+            session.ClientApplicationVersion = request.ApplicationVersion;
+            // TODO: make this somehow universal, look into better architecture to handle packets
+            // and automatically log their deserialized form
+
+            HandshakeResponse response = new()
+            {
+                Code = 0,
+                UtcOpenTime = 0,
+                Sha1Table = null
+            };
+
+            session.SendResponse(response, packet.Id);
+        }
+
+        [RequestPacketHandler("LoginRequest")]
+        public static void LoginRequestHandler(Session session, Packet.Request packet)
+        {
+            LoginRequest request = packet.Deserialize<LoginRequest>();
+            Player? player = Player.FromToken(request.Token);
+
+            if (player is null)
+            {
+                session.SendResponse(new LoginResponse
+                {
+                    Code = 1007 // LoginInvalidLoginToken
+                }, packet.Id);
+                return;
+            }
+
+            lock (Session.GetPlayerOperationLock(player.PlayerData.Id))
+            {
+                player = Player.FromToken(request.Token);
+                if (player is null)
+                {
+                    session.SendResponse(new LoginResponse
+                    {
+                        Code = 1007 // LoginInvalidLoginToken
+                    }, packet.Id);
+                    return;
+                }
+
+                Session? previousSession = FindOtherPlayerSession(session, player.PlayerData.Id);
+                if (previousSession is not null)
+                {
+                    // GateServerForceLogoutByAnotherLogin
+                    previousSession.SendPush(new ForceLogoutNotify { Code = 1018 });
+                    previousSession.DisconnectProtocol();
+
+                    // The previous session persisted its latest state while disconnecting.
+                    player = Player.FromToken(request.Token);
+                    if (player is null)
+                    {
+                        session.SendResponse(new LoginResponse
+                        {
+                            Code = 1007 // LoginInvalidLoginToken
+                        }, packet.Id);
+                        return;
+                    }
+                }
+
+                player.SimulatedBattlefield ??= new();
+                if (player.SimulatedBattlefield.BossRankPlatform != request.LoginPlatform)
+                {
+                    player.SimulatedBattlefield.BossRankPlatform = request.LoginPlatform;
+                    player.Save();
+                }
+
+                session.player = player;
+                session.character = Character.FromUid(player.PlayerData.Id, player.GatherRewards);
+                session.stage = Stage.FromUid(player.PlayerData.Id);
+                session.inventory = Inventory.FromUid(player.PlayerData.Id);
+                if (player.NormalizeEquipReferences(session.character.Equips.Select(equip => equip.Id).ToHashSet()))
+                    player.Save();
+
+                session.AppliedTeamPrefabId = null;
+                session.GuildIdentityReady = false;
+                GuildModule.BeginLogin(session);
+
+                session.SendResponse(new LoginResponse
+                {
+                    Code = 0,
+                    ReconnectToken = player.Token,
+                    UtcOffset = 0,
+                    UtcServerTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+                }, packet.Id);
+
+                DoLogin(session);
+            }
+        }
+
+        [RequestPacketHandler("ReconnectRequest")]
+        public static void ReconnectRequestHandler(Session session, Packet.Request packet)
+        {
+            ReconnectRequest request = packet.Deserialize<ReconnectRequest>();
+            Player? candidate = session.player ?? Player.FromToken(request.Token);
+            if (candidate?.PlayerData.Id != request.PlayerId)
+            {
+                session.SendResponse(new ReconnectResponse
+                {
+                    Code = 1029 // ReconnectInvalidToken
+                }, packet.Id);
+                return;
+            }
+
+            lock (Session.GetPlayerOperationLock(candidate.PlayerData.Id))
+            {
+                Player? player = session.player;
+                if (player is null)
+                {
+                    player = Player.FromToken(request.Token);
+                    if (player?.PlayerData.Id != request.PlayerId)
+                    {
+                        session.SendResponse(new ReconnectResponse
+                        {
+                            Code = 1029 // ReconnectInvalidToken
+                        }, packet.Id);
+                        return;
+                    }
+                }
+
+                Session? previousSession = FindOtherPlayerSession(session, player.PlayerData.Id);
+                if (previousSession is not null)
+                {
+                    previousSession.SendPush(new ForceLogoutNotify { Code = 1018 });
+                    previousSession.DisconnectProtocol();
+                    player = Player.FromToken(request.Token);
+                    if (player?.PlayerData.Id != request.PlayerId)
+                    {
+                        session.SendResponse(new ReconnectResponse
+                        {
+                            Code = 1029 // ReconnectInvalidToken
+                        }, packet.Id);
+                        return;
+                    }
+                }
+
+                session.log.Debug("Player is reconnecting...");
+                if (session.player is null
+                    || session.character is null
+                    || session.stage is null
+                    || session.inventory is null
+                    || previousSession is not null)
+                {
+                    session.log.Debug("Reassigning player props...");
+                    session.character = Character.FromUid(player.PlayerData.Id, player.GatherRewards);
+                    session.stage = Stage.FromUid(player.PlayerData.Id);
+                    session.inventory = Inventory.FromUid(player.PlayerData.Id);
+                    if (player.NormalizeEquipReferences(session.character.Equips.Select(equip => equip.Id).ToHashSet()))
+                        player.Save();
+                }
+
+                session.player = player;
+                session.ContinuePushSequenceFrom(request.LastMsgSeqNo);
+                session.SendResponse(new ReconnectResponse
+                {
+                    ReconnectToken = request.Token,
+                    RequestNo = request.LastMsgSeqNo
+                }, packet.Id);
+                session.GuildIdentityReady = true;
+                BossModule.ReconcileReconnect(session);
+                PartnerModule.SyncArchive(session);
+                TaskModule.SendTaskSync(session);
+            }
+        }
+
+        private static Session? FindOtherPlayerSession(Session session, long playerId)
+        {
+            return Server.Instance.Sessions.Values.FirstOrDefault(candidate =>
+                !ReferenceEquals(candidate, session)
+                && candidate.player is not null
+                && candidate.player.PlayerData.Id == playerId);
+        }
+
+        [RequestPacketHandler("ClientVersionRequest")]
+        public static void ClientVersionRequestHandler(Session session, Packet.Request packet)
+        {
+            _ = packet.Deserialize<ClientVersionRequest>();
+            session.SendResponse(new ClientVersionResponse { Version = DocumentVersionFor(session) }, packet.Id);
+        }
+
+        [RequestPacketHandler("SetServerBeanRequest")]
+        public static void SetServerBeanRequestHandler(Session session, Packet.Request packet)
+        {
+            _ = packet.Deserialize<SetServerBeanRequest>();
+            session.SendResponse(new SetServerBeanResponse(), packet.Id);
+        }
+
+        [RequestPacketHandler("SyncReadGameNoticeRequest")]
+        public static void SyncReadGameNoticeRequestHandler(Session session, Packet.Request packet)
+        {
+            SyncReadGameNoticeRequest request = packet.Deserialize<SyncReadGameNoticeRequest>();
+            SyncGameNoticeInfos(session.player, request.GameNoticeInfos);
+            session.SendResponse(new SyncReadGameNoticeResponse(), packet.Id);
+        }
+
+        [RequestPacketHandler("ChangeAssistCharIdRequest")]
+        public static void ChangeAssistCharIdRequestHandler(Session session, Packet.Request packet)
+        {
+            ChangeAssistCharIdRequest request = packet.Deserialize<ChangeAssistCharIdRequest>();
+            int currentAssistCharacterId = ResolveAssistCharacterId(session);
+
+            ChangeAssistCharIdResponse response = new();
+            if (request.AssistCharId == currentAssistCharacterId
+                || !session.character.Characters.Any(character => (int)character.Id == request.AssistCharId))
+            {
+                response.Code = ChangeAssistCharIdRejectedCode;
+                session.SendResponse(response, packet.Id);
+                return;
+            }
+
+            session.player.AssistCharacterId = request.AssistCharId;
+            session.player.Save();
+            session.SendResponse(response, packet.Id);
+        }
+
+        [RequestPacketHandler("UnlockArchiveComicsRequest")]
+        public static void UnlockArchiveComicsRequestHandler(Session session, Packet.Request packet)
+        {
+            UnlockArchiveComicsRequest request = packet.Deserialize<UnlockArchiveComicsRequest>();
+            List<int> successIds = UnlockArchiveComics(session.player, request.Ids);
+            session.SendResponse(new UnlockArchiveComicsResponse
+            {
+                Code = 0,
+                SuccessIds = successIds
+            }, packet.Id);
+        }
+
+        private static List<int> UnlockArchiveComics(Player player, List<int>? requestedIds)
+        {
+            List<int> successIds = new();
+            if (requestedIds is null || requestedIds.Count == 0)
+                return successIds;
+
+            player.UnlockComics ??= new();
+            foreach (int requestedId in requestedIds)
+            {
+                if (requestedId <= 0 || player.UnlockComics.Contains(requestedId) || successIds.Contains(requestedId))
+                    continue;
+
+                player.UnlockComics.Add(requestedId);
+                successIds.Add(requestedId);
+            }
+
+            if (successIds.Count == 0)
+                return successIds;
+
+            player.UnlockComics.Sort();
+            player.Save();
+            return successIds;
+        }
+
+        private static void SyncGameNoticeInfos(Player player, List<RedPointGameNoticeInfo>? gameNoticeInfos)
+        {
+            if (gameNoticeInfos is null || gameNoticeInfos.Count == 0)
+                return;
+
+            player.RedPointRecords ??= new();
+            Dictionary<string, RedPointGameNoticeInfo> savedById = player.RedPointRecords.GameNoticeInfos
+                .Where(IsValidGameNoticeInfo)
+                .GroupBy(info => info.NoticeId)
+                .ToDictionary(group => group.Key, group => group.OrderByDescending(info => info.ModifyTime).First());
+
+            bool changed = false;
+            foreach (RedPointGameNoticeInfo noticeInfo in gameNoticeInfos.Where(IsValidGameNoticeInfo))
+            {
+                if (savedById.TryGetValue(noticeInfo.NoticeId, out RedPointGameNoticeInfo? saved)
+                    && saved.ModifyTime == noticeInfo.ModifyTime
+                    && saved.EndTime == noticeInfo.EndTime)
+                {
+                    continue;
+                }
+
+                savedById[noticeInfo.NoticeId] = noticeInfo;
+                changed = true;
+            }
+
+            if (!changed && savedById.Count == player.RedPointRecords.GameNoticeInfos.Count)
+                return;
+
+            player.RedPointRecords.GameNoticeInfos = savedById.Values
+                .OrderBy(info => info.NoticeId, StringComparer.Ordinal)
+                .ToList();
+            player.Save();
+        }
+
+        private static bool IsValidGameNoticeInfo(RedPointGameNoticeInfo noticeInfo)
+        {
+            return !string.IsNullOrWhiteSpace(noticeInfo.NoticeId);
+        }
+
+        [RequestPacketHandler("ReconnectAck")]
+        public static void ReconnectAckHandler(Session session, Packet.Request packet)
+        {
+            // Retail clients send ReconnectAck as a client push; the push path logs it.
+        }
+
+        [RequestPacketHandler("FinishBriefStoryRequest")]
+        public static void FinishBriefStoryRequestHandler(Session session, Packet.Request packet)
+        {
+            FinishBriefStoryRequest request = packet.Deserialize<FinishBriefStoryRequest>();
+            FinishBriefStoryResponse response = new()
+            {
+                Code = 0
+            };
+
+            if (IsValidBriefStoryId(request.Id))
+                session.player.AddFinishedBriefStoryId(request.Id);
+
+            session.SendResponse(response, packet.Id);
+        }
+
+        private static bool IsValidBriefStoryId(int storyId)
+        {
+            return storyId > 0
+                && TableReaderV2.Parse<AscNet.Table.V2.share.activitybrief.ActivityBriefStoryTable>()
+                    .Any(story => story.Id == storyId);
+        }
+
+        internal static NotifyBriefStoryData BuildNotifyBriefStoryData(Player player)
+        {
+            return new()
+            {
+                FinishedIds = player.BriefStoryFinishedIds.Distinct().OrderBy(id => id).Cast<dynamic>().ToList()
+            };
+        }
+        
+        internal static void SendLoginState(Session session)
+        {
+            session.SendPush(BuildNotifyLogin(session));
+        }
+
+        private static TimeLimitCtrlConfigList MakeTimeLimitControl(long id, long startTime, long endTime)
+        {
+            return new()
+            {
+                Id = id,
+                StartTime = startTime,
+                EndTime = endTime,
+                StartTimeStr = FormatTimeLimitBound(startTime),
+                EndTimeStr = FormatTimeLimitBound(endTime)
+            };
+        }
+
+        /// <summary>Deterministic UTC display string ("yyyy/M/d H:mm"); null when the bound is unbounded (0).</summary>
+        private static string? FormatTimeLimitBound(long unixSeconds)
+        {
+            if (unixSeconds == 0)
+                return null;
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds).ToUniversalTime().ToString("yyyy/M/d H:mm");
+        }
+
+        private static List<TimeLimitCtrlConfigList> BuildTimeLimitControlConfigList()
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            return BuildTimeLimitControlConfigList(now, WheelchairManualModule.IsActive(now));
+        }
+
+        internal static List<TimeLimitCtrlConfigList> BuildTimeLimitControlConfigList(
+            DateTimeOffset now,
+            bool wheelchairActivityActive)
+        {
+            Dictionary<long, TimeLimitCtrlConfigList> controls = ActivityScheduleService.All.ToDictionary(
+                row => row.Id,
+                row => MakeTimeLimitControl(row.Id, row.StartTime, row.EndTime));
+            foreach (var anchor in TransfiniteModule.GetAnchoredActivities())
+            {
+                controls[anchor.Schedule.Id] = MakeTimeLimitControl(
+                    anchor.Schedule.Id,
+                    anchor.Schedule.StartTime,
+                    anchor.EndTime == long.MaxValue ? 0 : anchor.EndTime);
+            }
+
+            void AddDerived(long id, long startTime, long endTime)
+            {
+                if (id > 0)
+                    controls.TryAdd(id, MakeTimeLimitControl(id, startTime, endTime));
+            }
+
+            foreach (PassportActivityTable passport in TableReaderV2.Parse<PassportActivityTable>()
+                .Where(activity => activity.TimeId is > 0
+                    && ActivityScheduleService.TryGet(activity.TimeId.Value, out ActivityScheduleEntry schedule)
+                    && schedule.IsOpen(now)))
+            {
+                ActivityScheduleService.TryGet(passport.TimeId!.Value, out ActivityScheduleEntry schedule);
+                PassportTaskGroupTable[] rounds = TableReaderV2.Parse<PassportTaskGroupTable>()
+                    .Where(group => group.Group == passport.WeekTaskGroup
+                        && group.Type == 2
+                        && group.TimeId is > 0)
+                    .OrderBy(group => group.TimeId)
+                    .ToArray();
+                long firstWeeklyReset = checked(schedule.StartTime
+                    + TaskModule.RemainingSecondsInWeeklyResetPeriod(schedule.StartTime));
+                for (int index = 0; index < rounds.Length; index++)
+                {
+                    long start = index == 0
+                        ? schedule.StartTime
+                        : checked(firstWeeklyReset + (index - 1) * 604_800L);
+                    long nextStart = checked(firstWeeklyReset + index * 604_800L);
+                    long end = index == rounds.Length - 1 && schedule.EndTime != 0
+                        ? schedule.EndTime - 60
+                        : nextStart - 60;
+                    AddDerived(rounds[index].TimeId!.Value, start, end);
+                }
+            }
+
+
+            Dictionary<int, ActivityBriefGroupTable> groups = TableReaderV2.Parse<ActivityBriefGroupTable>()
+                .ToDictionary(group => group.Id);
+            foreach (ActivityBriefTable brief in TableReaderV2.Parse<ActivityBriefTable>().Where(brief => brief.TimeId > 0))
+            {
+                ActivityScheduleEntry[] openChildSchedules = brief.GroupIdList
+                    .Where(groupId => groupId > 0 && groups.TryGetValue(groupId, out _))
+                    .Select(groupId => groups[groupId].TimeId)
+                    .Where(timeId => timeId is > 0 && ActivityScheduleService.TryGet(timeId.Value, out _))
+                    .Select(timeId => timeId!.Value)
+                    .Select(timeId =>
+                    {
+                        ActivityScheduleService.TryGet(timeId, out ActivityScheduleEntry schedule);
+                        return schedule;
+                    })
+                    .Where(schedule => schedule.IsOpen(now))
+                    .OrderBy(schedule => schedule.Id)
+                    .ToArray();
+                if (openChildSchedules.Length != 0)
+                {
+                    AddDerived(
+                        brief.TimeId,
+                        openChildSchedules.Min(schedule => schedule.StartTime),
+                        openChildSchedules.Any(schedule => schedule.EndTime == 0)
+                            ? 0
+                            : openChildSchedules.Max(schedule => schedule.EndTime));
+                }
+            }
+
+            Dictionary<int, TeachingActivityTable> teachingActivities = TableReaderV2.Parse<TeachingActivityTable>()
+                .ToDictionary(activity => activity.Id);
+            Dictionary<int, SkipFunctionalTable> skipFunctions = TableReaderV2.Parse<SkipFunctionalTable>()
+                .GroupBy(skip => skip.SkipId)
+                .ToDictionary(group => group.Key, group => group.First());
+            foreach (NewActivityCalendarActivityTable calendar in TableReaderV2.Parse<NewActivityCalendarActivityTable>()
+                .Where(calendar => ActivityScheduleService.TryGet(calendar.MainTimeId, out ActivityScheduleEntry schedule)
+                    && schedule.IsOpen(now))
+                .OrderBy(calendar => calendar.ActivityId))
+            {
+                ActivityScheduleService.TryGet(calendar.MainTimeId, out ActivityScheduleEntry outerSchedule);
+                if (!skipFunctions.TryGetValue(calendar.SkipId, out SkipFunctionalTable? skip))
+                    continue;
+
+                foreach (int teachingActivityId in skip.CustomParams
+                    .Append(skip.ParamId ?? 0)
+                    .Where(id => id > 0)
+                    .Distinct()
+                    .OrderBy(id => id))
+                {
+                    if (teachingActivities.TryGetValue(teachingActivityId, out TeachingActivityTable? teaching)
+                        && teaching.TimeId is > 0)
+                    {
+                        AddDerived(teaching.TimeId.Value, outerSchedule.StartTime, outerSchedule.EndTime);
+                    }
+                }
+            }
+            foreach (SignInTable signIn in TableReaderV2.Parse<SignInTable>())
+            {
+                if (signIn.Type == 1 && signIn.TimeId is int timeId && timeId > 0)
+                    AddDerived(timeId, 0, 0);
+            }
+
+            if (wheelchairActivityActive)
+            {
+                foreach (ActivityBtnTable button in TableReaderV2.Parse<ActivityBtnTable>()
+                    .Where(button => button.TimeId is > 0
+                        && button.ManagerName?.Contains("Wheelchair", StringComparison.OrdinalIgnoreCase) == true)
+                    .OrderBy(button => button.Id))
+                {
+                    if (button.TimeId is not int timeId)
+                        continue;
+                    if (skipFunctions.TryGetValue(button.SkipId, out SkipFunctionalTable? skip)
+                        && skip.UiName?.Contains("Wheelchair", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        AddDerived(timeId, 0, 0);
+                    }
+                }
+                // Server-owned policy: configured manual periods remain available without a supplied window.
+                foreach (int timeId in TableReaderV2.Parse<AscNet.Table.V2.share.wheelchairmanual.WheelchairManualGuideActivityPeriodTable>()
+                    .Select(period => period.TimeId).Distinct())
+                    AddDerived(timeId, 0, 0);
+            }
+
+            foreach (TimeLimitCtrlConfigList control in GuildWarModule.BuildTimeLimits(now))
+                controls[control.Id] = control;
+            foreach (TimeLimitCtrlConfigList control in GuildBossModule.BuildTimeLimits(now))
+                controls[control.Id] = control;
+            return controls.Values.OrderBy(control => control.Id).ToList();
+        }
+
+        private static List<FunctionOpenTimeConfig> BuildFunctionOpenTimeConfigList(
+            IEnumerable<TimeLimitCtrlConfigList> controls)
+        {
+            HashSet<long> emittedTimeIds = controls.Select(control => control.Id).ToHashSet();
+            int[] bigWorldFunctionIds = TableReaderV2.Parse<SkipFunctionalTable>()
+                .Where(row => row.UiName == "SkipToBigWorld" && row.FunctionalId is > 0)
+                .Select(row => row.FunctionalId!.Value)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToArray();
+            int[] bigWorldTimeIds = TableReaderV2.Parse<BigWorldCourseVersionTable>()
+                .Where(row => row.TimeId is > 0 && emittedTimeIds.Contains(row.TimeId))
+                .Select(row => row.TimeId)
+                .Distinct()
+                .OrderBy(id => id)
+                .ToArray();
+
+            return bigWorldFunctionIds
+                .SelectMany(functionId => bigWorldTimeIds.Select(timeId => new FunctionOpenTimeConfig
+                {
+                    FunctionId = functionId,
+                    TimeId = timeId
+                }))
+                .ToList();
+        }
+
+        private static List<dynamic> BuildPurchaseClientInfoLoginData(Player player)
+        {
+            List<PurchasePackageYKUiConfigTable> packages =
+                TableReaderV2.Parse<PurchasePackageYKUiConfigTable>();
+            HashSet<int> packageIds = packages.Select(package => package.Id).ToHashSet();
+            int monthlyUiType = TableReaderV2.Parse<SignCardTable>()
+                .Where(card => card.Param.Count >= 2
+                    && card.Param[0] > 0
+                    && packageIds.Contains(card.Param[1]))
+                .Select(card => card.Param[0])
+                .Distinct()
+                .Single();
+            return packages
+                .OrderBy(package => package.Id)
+                .Select(package => (dynamic)new GetPurchaseListResponse.GetPurchaseListResponsePurchaseInfo
+                {
+                    Id = (uint)package.Id,
+                    UiType = monthlyUiType,
+                    BuyTimes = Math.Max(player.PurchaseBuyTimes.GetValueOrDefault((uint)package.Id),
+                        PayModule.RemainingDays(player, (uint)package.Id) > 0 ? 1 : 0),
+                    DailyRewardRemainDay = PayModule.RemainingDays(player, (uint)package.Id),
+                    BuyLimitRemainDay = PayModule.RemainingDays(player, (uint)package.Id),
+                    IsDailyRewardGet = player.PurchaseDailyPasses.GetValueOrDefault((uint)package.Id)?.LastClaimDay == PayModule.PurchaseDay()
+                })
+                .ToList();
+        }
+
+        private static NotifyLogin BuildNotifyLogin(Session session) =>
+            BuildNotifyLogin(session, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+
+        private static NotifyLogin BuildNotifyLogin(Session session, long now)
+        {
+            ItemModule.ResumePendingItemUse(session);
+            ItemModule.ResumePendingBuyAsset(session);
+            ItemModule.ReconcileDailyAssetPurchaseCounts(session.inventory);
+            PayModule.ResumePendingPurchase(session, out _);
+            DrawModule.ResumePendingDraw(session);
+            GachaManager.RecoverPending(session);
+            MineSweepingModule.RecoverPending(session);
+            StudyProgressModule.ResumePartialTreasureClaims(session);
+            PartnerModule.ResumePendingPartnerDecompose(session);
+            BiancaTheatreModule.PrepareLogin(session);
+            GuildModule.PrepareLogin(session);
+            GuildBossModule.PrepareLogin(session);
+            GuildWarModule.PrepareLogin(session);
+            GuildDormModule.PrepareLogin(session);
+            WheelchairManualModule.RefreshProgress(session);
+            BossModule.PrepareLoginAt(session, now);
+            BossInshotModule.PrepareLogin(session.player, DateTimeOffset.UtcNow);
+            FashionStoryModule.PrepareLogin(session.player, DateTimeOffset.UtcNow);
+            TransfiniteModule.PrepareLogin(session, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            if (Common.Common.config.SkipCommonGuides)
+                GuideModule.SkipCommonGuides(session.player);
+            GuideModule.ReconcileStageCompletedGuides(session.player, session.stage);
+            List<TimeLimitCtrlConfigList> timeLimitControls = BuildTimeLimitControlConfigList();
+            NotifyLogin notifyLogin = new()
+            {
+                PlayerData = session.player.PlayerData,
+                TimeLimitCtrlConfigList = timeLimitControls,
+                ItemList = Inventory.FilterClientItems(session.inventory.Items),
+                CharacterList = session.character.Characters.Select(ToLoginCharacter).ToList(),
+                EquipList = session.character.Equips,
+                FashionList = session.character.Fashions,
+                WeaponFashionList = session.character.WeaponFashions
+                    .Select(fashion => new WeaponFashionData
+                    {
+                        Id = fashion.Id,
+                        ExpireTime = fashion.ExpireTime,
+                        UseCharacterList = fashion.UseCharacterList.ToList()
+                    })
+                    .ToList(),
+                PartnerList = session.character.Partners,
+                FashionSuitList = FashionModule.BuildClaimedFashionSuits(session),
+                FashionColors = BuildOwnedFashionColors(session.character),
+                HeadPortraitList = session.player.HeadPortraits,
+                TeamGroupData = session.player.TeamGroups,
+                TeamPrefabData = (session.player.TeamPrefabs ?? [])
+                    .OfType<TeamPrefabData>()
+                    .Select((teamPrefab, index) => new { Key = index + 1, Value = teamPrefab })
+                    .ToDictionary(entry => entry.Key, entry => entry.Value),
+                FubenData = new()
+                {
+                    StageData = BuildLoginStageData(session),
+                    FubenBaseData = new(),
+                    UnlockHideStages = FightModule.BuildUnlockedHideStages(session.stage)
+                },
+                IsSetFightCgEnable = true,
+                FubenMainLineData = session.player.FubenMainLineData,
+                FubenEventData = new(),
+                FubenMainLine2Data = MainLine2Module.BuildLoginData(session),
+                FubenMainLineLuosaitaData = MainLineLuosaitaPayloadFactory.BuildLoginData(session.stage),
+                FubenChapterExtraLoginData = new(),
+                FubenUrgentEventData = new(),
+                FubenShortStoryLoginData = new(),
+                SignInfos = SignInModule.BuildLoginSignInfos(session.player),
+                UseBackgroundId = session.player.UseBackgroundId,
+                HaveBackgroundIds = BuildHaveBackgroundIds(session.player),
+                RandomBackgroundLoginData = new(),
+                PurchaseClientInfoLoginData = BuildPurchaseClientInfoLoginData(session.player),
+                FunctionOpenTimeConfigList = BuildFunctionOpenTimeConfigList(timeLimitControls),
+                DlcPlayerData = new(),
+                DlcCharacterList = session.character.Characters.Select(ToDlcCharacter).ToList(),
+                RedPointRecords = session.player.RedPointRecords ?? new(),
+                AudioPlayerLoginData = AudioPlayerModule.BuildLoginData(session.player)
+            };
+            if (notifyLogin.PlayerData.DisplayCharIdList.Count < 1)
+                notifyLogin.PlayerData.DisplayCharIdList.Add(notifyLogin.PlayerData.DisplayCharId);
+
+
+            notifyLogin.PlayerData.ShieldFuncList ??= new List<dynamic>();
+            notifyLogin.PlayerData.ShieldFuncList.RemoveAll(IsHomeChatShieldFunction);
+            if (notifyLogin.PlayerData.ShieldFuncList.Count == 0)
+                notifyLogin.PlayerData.ShieldFuncList.Add(8001);
+
+            notifyLogin.PlayerData.Communications ??= new List<long>();
+            HashSet<long> communicationIds = notifyLogin.PlayerData.Communications.ToHashSet();
+            foreach (long communicationId in DefaultCommunicationIds)
+            {
+                if (communicationIds.Add(communicationId))
+                    notifyLogin.PlayerData.Communications.Add(communicationId);
+            }
+
+
+            return notifyLogin;
+        }
+
+        private static Dictionary<int, List<int>> BuildOwnedFashionColors(Character character)
+        {
+            character.FashionColors ??= [];
+            return TableReaderV2.Parse<FashionColorTable>()
+                .Where(color =>
+                    color.Id > 0
+                    && character.FashionColors.TryGetValue(
+                        color.OriginalFashionId,
+                        out List<int>? ownedColors)
+                    && ownedColors.Contains(color.Id))
+                .GroupBy(color => color.OriginalFashionId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(color => color.Id).Distinct().Order().ToList());
+        }
+
+        private static bool IsHomeChatShieldFunction(dynamic value)
+        {
+            try
+            {
+                long functionId = Convert.ToInt64(value);
+                return functionId is 802 or 803;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static List<int> BuildHaveBackgroundIds(Player player)
+        {
+            HashSet<int> backgroundIds = TableReaderV2.Parse<BackgroundTable>()
+                .Where(background => background.Id > 0 && background.IsFree > 0)
+                .Select(background => background.Id)
+                .ToHashSet();
+
+            if (player.OwnedBackgroundIds is not null)
+                backgroundIds.UnionWith(player.OwnedBackgroundIds);
+
+            if (player.UseBackgroundId > 0)
+                backgroundIds.Add(player.UseBackgroundId);
+
+            return backgroundIds.Order().ToList();
+        }
+
+        private static Dictionary<long, StageDatum> BuildLoginStageData(Session session)
+        {
+            return session.stage?.Stages is null
+                ? new Dictionary<long, StageDatum>()
+                : new Dictionary<long, StageDatum>(session.stage.Stages);
+        }
+
+
+
+
+        private static DlcCharacter ToDlcCharacter(CharacterData character)
+        {
+            return new()
+            {
+                Id = character.Id,
+                FashionId = character.FashionId,
+                FashionColorId = 0,
+                ChipFormId = 0,
+                CreateTime = character.CreateTime,
+                StyleType = 0
+            };
+        }
+
+        private static NotifyMedalData BuildMedalLoginData(Player player)
+        {
+            return new NotifyMedalData
+            {
+                MedalInfos = (player.UnlockedMedals ?? [])
+                    .Select(medal => new NotifyMedalData.NotifyMedalDataMedalInfo
+                    {
+                        Id = medal.Id,
+                        Time = medal.Time,
+                        KeepTime = medal.KeepTime
+                    })
+                    .ToList()
+            };
+        }
+
+        private static NotifyChatBoardLoginData BuildChatBoardLoginData(Player player)
+        {
+            long now = DateTimeOffset.Now.ToUnixTimeSeconds();
+            long defaultGetTime = player.PlayerData.CreateTime > 0 ? player.PlayerData.CreateTime : now;
+            Dictionary<long, NotifyChatBoardLoginData.NotifyChatBoardLoginDataChatBoard> chatBoards =
+                DefaultChatBoardIds.ToDictionary(
+                    id => id,
+                    id => new NotifyChatBoardLoginData.NotifyChatBoardLoginDataChatBoard
+                    {
+                        Id = id,
+                        GetTime = defaultGetTime,
+                        EndTime = 0
+                    });
+            foreach (ChatBoardUnlockState unlock in player.UnlockedChatBoards ?? [])
+            {
+                if (unlock.EndTime == 0 || unlock.EndTime > now)
+                {
+                    chatBoards[unlock.Id] = new NotifyChatBoardLoginData.NotifyChatBoardLoginDataChatBoard
+                    {
+                        Id = unlock.Id,
+                        GetTime = unlock.GetTime,
+                        EndTime = unlock.EndTime
+                    };
+                }
+            }
+
+            long currentChatBoardId = player.PlayerData.CurrentChatBoardId;
+            if (currentChatBoardId > 0
+                && !chatBoards.ContainsKey(currentChatBoardId)
+                && !(player.UnlockedChatBoards ?? []).Any(unlock => unlock.Id == currentChatBoardId))
+            {
+                chatBoards[currentChatBoardId] = new NotifyChatBoardLoginData.NotifyChatBoardLoginDataChatBoard
+                {
+                    Id = currentChatBoardId,
+                    GetTime = defaultGetTime,
+                    EndTime = 0
+                };
+            }
+            if (!chatBoards.ContainsKey(currentChatBoardId))
+            {
+                currentChatBoardId = DefaultChatBoardId;
+                player.PlayerData.CurrentChatBoardId = currentChatBoardId;
+            }
+
+            return new()
+            {
+                CurrentChatBoardId = currentChatBoardId,
+                ChatBoards = chatBoards.Values.OrderBy(chatBoard => chatBoard.Id).ToList()
+            };
+        }
+
+        private static NotifyPayInfo BuildNotifyPayInfo()
+        {
+            return new()
+            {
+                TotalPayMoney = 0,
+                FirstRewardReceivedList = []
+            };
+        }
+
+        private static NotifyFunctionalEntranceData BuildFunctionalEntranceData()
+        {
+            return new()
+            {
+                RedPointDatas = new()
+                {
+                    { 20000, 45 }
+                }
+            };
+        }
+
+        private static PurchaseDailyNotify BuildPurchaseDailyNotify()
+        {
+            PurchaseDailyNotify notify = new();
+            notify.FreeRewardInfoList.Add(new()
+            {
+                Id = 90943,
+                Name = "Serum Daily Supply",
+                UiType = 6
+            });
+            notify.FreeRewardInfoList.Add(new()
+            {
+                Id = 90944,
+                Name = "Weekly Limited Pack",
+                UiType = 6
+            });
+
+            return notify;
+        }
+
+        private static NotifyPurchaseRecommendConfig BuildPurchaseRecommendConfig()
+        {
+            return new()
+            {
+                Data = new()
+                {
+                    AddOrModifyConfigs = new(),
+                    RemoveIds = []
+                }
+            };
+        }
+
+        private static NotifyRegression2Data BuildRegressionLoginData()
+        {
+            return new()
+            {
+                Data = new()
+                {
+                    ActivityData = new()
+                    {
+                        Id = 1,
+                        State = 1
+                    },
+                    SignInData = null!
+                }
+            };
+        }
+
+        private static NotifyTask BuildEmptyNotifyTask()
+        {
+            return new()
+            {
+                Tasks = new()
+            };
+        }
+
+        private static NotifyBfrtData BuildBfrtLoginData(Player player) => BfrtModule.BuildLoginData(player);
+
+        private static NotifyTRPGData BuildTrpgLoginData()
+        {
+            return new()
+            {
+                CurTargetLink = 10001,
+                BaseInfo = new()
+                {
+                    Level = 1
+                },
+                BossInfo = new()
+            };
+        }
+
+
+        /// <summary>
+        /// True when the player's last recorded activity fell on an earlier 05:00-UTC business day
+        /// than the current login, i.e. a business-day rollover occurred since the prior login.
+        /// </summary>
+        private static bool IsNewBusinessDay(long previousLastLoginTime, long currentTime)
+        {
+            if (previousLastLoginTime <= 0)
+                return false;
+            const long fiveAmUtcOffset = 5 * 3600;
+            long previousBusinessDay = (previousLastLoginTime - fiveAmUtcOffset) / 86_400;
+            long currentBusinessDay = (currentTime - fiveAmUtcOffset) / 86_400;
+            return currentBusinessDay > previousBusinessDay;
+        }
+
+        private static uint NextDailyRefreshTime() =>
+            DormModule.NextDailyRefreshTime(checked((uint)DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+
+        private static readonly IReadOnlyDictionary<string, byte[]> SupportedStartupPushPayloads = new Dictionary<string, byte[]>
+        {
+            ["NotifyDlcFightCharacterId"] = SerializeStartupPayload(new Dictionary<string, object?>
+            {
+                ["FightCharacterId"] = 0
+            }),
+            ["NotifyDlcChipFormDataList"] = SerializeStartupPayload(new Dictionary<string, object?>
+            {
+                ["ChipFormDataList"] = Array.Empty<object>()
+            }),
+            ["NotifyDlcChipAssistChipId"] = SerializeStartupPayload(new Dictionary<string, object?>
+            {
+                ["AssistChipId"] = 0
+            }),
+            ["NotifyHoldRegressionIgnoreChannel"] = SerializeStartupPayload(new Dictionary<string, object?>
+            {
+                ["IgnoreChannelIds"] = Array.Empty<object>()
+            }),
+            ["NotifyNewActivityCalendarData"] = SerializeStartupPayload(BuildNewActivityCalendarPayload()),
+            ["NotifyAccumulateExpendData"] = SerializeStartupPayload(BuildAccumulateExpendPayload()),
+            ["NotifyReviewConfig"] = SerializeStartupPayload(new Dictionary<string, object?>
+            {
+                ["ReviewActivityConfigList"] = Array.Empty<object>()
+            }),
+            ["NotifyMentorData"] = SerializeStartupPayload(new Dictionary<string, object?>
+            {
+                ["PlayerType"] = 0,
+                ["Teacher"] = new Dictionary<string, object?>(),
+                ["Students"] = Array.Empty<object>(),
+                ["ApplyList"] = Array.Empty<object>(),
+                ["GraduateStudentCount"] = 0,
+                ["StageReward"] = Array.Empty<object>(),
+                ["WeeklyTaskReward"] = Array.Empty<object>(),
+                ["WeeklyTaskCompleteCount"] = 0,
+                ["Tag"] = Array.Empty<object>(),
+                ["OnlineTag"] = Array.Empty<object>(),
+                ["Announcement"] = string.Empty,
+                ["DailyChangeTaskCount"] = 0,
+                ["WeeklyLevel"] = 0,
+                ["MonthlyStudentCount"] = 0,
+                ["Message"] = null
+            }),
+            ["NotifyMentorChat"] = SerializeStartupPayload(new Dictionary<string, object?>
+            {
+                ["ChatMessages"] = Array.Empty<object>()
+            }),
+            ["NotifyGame2048DataDb"] = SerializeStartupPayload(BuildGame2048Payload()),
+            ["NotifyGameCollectionData"] = SerializeStartupPayload(BuildGameCollectionPayload()),
+            ["NotifyGoldenMinerGameInfo"] = SerializeStartupPayload(BuildGoldenMinerPayload()),
+            ["NotifyTaikoMasterData"] = SerializeStartupPayload(BuildTaikoMasterPayload()),
+            ["NotifyTurntableData"] = SerializeStartupPayload(BuildTurntablePayload())
+        };
+
+        private static byte[] SerializeStartupPayload(Dictionary<string, object?> payload)
+        {
+            return MessagePackPayloads.Serialize(payload);
+        }
+
+        private static void SendEmptyStartupPush(Session session, string name)
+        {
+            if (name == "NotifyNewActivityCalendarData")
+            {
+                session.SendPush(name, SerializeStartupPayload(BuildNewActivityCalendarPayload()));
+                return;
+            }
+            if (name == nameof(NotifyWheelchairManualActivity))
+            {
+                session.SendPush(WheelchairManualModule.BuildPayload(session, DateTimeOffset.UtcNow));
+                return;
+            }
+            if (name == nameof(NotifyWheelchairManualActivityUpdate))
+            {
+                session.SendPush(WheelchairManualGuideManager.BuildUpdate(session, DateTimeOffset.UtcNow));
+                return;
+            }
+            if (name == nameof(NotifyGuildData))
+            {
+                session.SendPush(GuildModule.BuildLoginData(session));
+                session.GuildIdentityReady = true;
+                return;
+            }
+            if (name == nameof(NotifyGuildSignPlayerData))
+            {
+                session.SendPush(GuildModule.BuildSignLoginData(session));
+                return;
+            }
+            if (name == nameof(NotifyGuildDormPlayerData))
+            {
+                session.SendPush(GuildDormModule.BuildLoginData(session));
+                return;
+            }
+            if (name == nameof(NotifyGuildWarActivityData))
+            {
+                session.SendPush(GuildWarModule.BuildLoginData(session));
+                return;
+            }
+            if (name == "NotifyExperimentData")
+            {
+                session.SendPush(name, SerializeStartupPayload(BuildExperimentPayload(session.stage)));
+                return;
+            }
+            if (name == nameof(NotifyFestivalData))
+            {
+                session.SendPush(name, SerializeStartupPayload(BuildFestivalPayload(session.stage)));
+                return;
+            }
+            if (name == "NotifySelfChoiceLottoData")
+            {
+                session.SendPush(name, SerializeStartupPayload(BuildSelfChoiceLottoPayload(session.player)));
+                return;
+            }
+            if (name == "NotifyClientVersion")
+            {
+                session.SendPush(name, SerializeStartupPayload(new Dictionary<string, object?>
+                {
+                    ["Version"] = DocumentVersionFor(session),
+                    ["KickOut"] = false
+                }));
+                return;
+            }
+            if (SupportedStartupPushPayloads.TryGetValue(name, out byte[]? supportedPayload))
+                session.SendPush(name, supportedPayload);
+        }
+
+
+
+
+        private static int ResolveAssistCharacterId(Session session)
+        {
+            int savedAssistCharacterId = session.player.AssistCharacterId;
+            if (savedAssistCharacterId != 0
+                && session.character.Characters.Any(character => (int)character.Id == savedAssistCharacterId))
+            {
+                return savedAssistCharacterId;
+            }
+
+            int fallbackAssistCharacterId = (int)(session.character.Characters.FirstOrDefault()?.Id ?? 0);
+            if (session.player.AssistCharacterId != fallbackAssistCharacterId)
+                session.player.AssistCharacterId = fallbackAssistCharacterId;
+
+            return fallbackAssistCharacterId;
+        }
+
+        private static NotifyArchiveLoginData BuildNotifyArchiveLoginData(Player player)
+        {
+            List<int> unlockComics = player.UnlockComics is { Count: > 0 }
+                ? player.UnlockComics.Distinct().Order().ToList()
+                : ArchiveDefaults.CreateDefaultUnlockedArchiveComics();
+            List<SimulateTrainMonsterTable> simulateTrainBosses = TableReaderV2.Parse<SimulateTrainMonsterTable>()
+                .Where(row => row.NpcId.Count > 0)
+                .ToList();
+            // A zero-count record unlocks the archive's main entry without claiming a kill.
+            Dictionary<int, int> archiveMonsters = simulateTrainBosses
+                .Select(row => row.NpcId.First())
+                .Distinct()
+                .ToDictionary(npcId => npcId, _ => 0);
+            foreach ((int npcId, int killed) in player.ArchiveMonsterKills ?? [])
+            {
+                if (npcId > 0 && killed > 0)
+                    archiveMonsters[npcId] = killed;
+            }
+
+            return new NotifyArchiveLoginData
+            {
+                Monsters = archiveMonsters
+                    .OrderBy(record => record.Key)
+                    .Select(record => new NotifyArchiveLoginData.NotifyArchiveLoginDataMonster
+                    {
+                        Id = checked((uint)record.Key),
+                        Killed = record.Value
+                    })
+                    .ToList(),
+                MonsterUnlockIds = simulateTrainBosses
+                    .Select(row => (uint)row.Id)
+                    .Distinct()
+                    .Order()
+                    .ToList(),
+                UnlockComics = unlockComics,
+                UnlockCgs = player.ArchiveUnlockedCgs.Order().Select(id => checked((uint)id)).ToList(),
+                PartnerUnlockIds = player.ArchivePartnerUnlockIds.ToList(),
+                PartnerSettings = player.ArchivePartnerSettings.ToList()
+            };
+        }
+
+        private static NotifyEquipChipAutoRecycleSite BuildEquipChipAutoRecycleNotify(Player player) => new()
+        {
+            ChipRecycleSite = player.EquipChipAutoRecycleSite
+        };
+
+        // TODO: Move somewhere else, also split.
+        static void DoLogin(Session session)
+        {
+            DoLogin(session, updateLoginAccounting: true);
+        }
+        private static void ReconcileGatherRewardBaselines(Session session)
+        {
+            HashSet<int> ownedCharacterIds = session.character.Characters.Select(character => (int)character.Id).ToHashSet();
+            foreach (ExhibitionRewardTable reward in TableReaderV2.Parse<ExhibitionRewardTable>().Where(reward =>
+                         reward.LevelId == 1
+                         && reward.ConditionIds.Count == 0
+                         && ownedCharacterIds.Contains(reward.CharacterId)))
+            {
+                session.player.AddGatherReward(reward.Id);
+            }
+        }
+
+        static void DoLogin(Session session, bool updateLoginAccounting)
+        {
+            // Recover the frozen outcome before login accounting can save the player's document.
+            Theatre6Module.ResumePending(session, forLogin: true);
+            long currentTime = DateTimeOffset.Now.ToUnixTimeSeconds();
+            long previousLastLoginTime = session.player.PlayerData.LastLoginTime;
+            if (updateLoginAccounting)
+                TaskModule.RecordLoginDay(session, currentTime);
+            ReconcileGatherRewardBaselines(session);
+            RepairProfileCosmeticRewards(session);
+            session.player.NormalizeTeamPrefabs();
+            session.ClampPlayerLevelToConfiguredMaximum();
+            (ActivityResultNotify? arenaResult, NotifyArenaActivity arenaActivity) = ArenaModule.ReconcileLogin(session);
+            StrongholdModule.PrepareLogin(session.player);
+            if (PartnerModule.RefreshArchive(session.player, session.character))
+                session.player.SaveChecked();
+            ArchiveCgModule.Reconcile(session, notify: false);
+
+
+            // Reconcile before NotifyLogin so repaired equipped head ids are present in the login
+            // payload; the returned timeout state is pushed AFTER NotifyLogin (retail order).
+            NotifyHeadTimeout? headTimeout = PlayerModule.ReconcileHeadTimeouts(session, DateTimeOffset.UtcNow);
+
+            TheatreModule.PrepareLogin(session);
+            Theatre3Module.PrepareLogin(session);
+            Theatre4Module.PrepareLogin(session);
+            Theatre5Module.PrepareLogin(session);
+            Theatre6Module.PrepareLogin(session);
+            Theatre6PvpModule.RecoverPendingDefense(session);
+            NotifyLogin notifyLogin = BuildNotifyLogin(session, currentTime);
+
+
+            NotifyAssistData notifyAssistData = new()
+            {
+                AssistData = new()
+                {
+                    AssistCharacterId = (uint)ResolveAssistCharacterId(session)
+                }
+            };
+
+            NotifyChatLoginData notifyChatLoginData = new()
+            {
+                RefreshTime = ((DateTimeOffset)Process.GetCurrentProcess().StartTime).ToUnixTimeSeconds(),
+                UnlockEmojis = session.character.GetUnlockedEmojis(DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+            };
+
+            PassportModule.PrepareLogin(session);
+            BfrtModule.ReconcileTaskStages(session);
+            NotifyTaskData notifyTaskData = new()
+            {
+                TaskData = new()
+                {
+                    NewbieHonorReward = session.player.MissionProgress.NewbieHonorReward,
+                    NewbieUnlockPeriod = 7,
+                    Course = session.stage.Course,
+                    FinishedTasks = session.stage.FinishedTasks,
+                    NewPlayerRewardRecord = session.player.MissionProgress.NewPlayerRewardRecords,
+                    NewbieRecvProgress = session.player.MissionProgress.NewbieRewardRecords,
+                    Tasks = TaskModule.BuildTaskData(session),
+                }
+            };
+            NotifyGatherRewardList notifyGatherRewardList = new()
+            {
+                GatherRewards = session.player.GatherRewards
+            };
+
+            NotifyBirthdayPlot notifyBirthdayPlot = new()
+            {
+                IsChange = session.player.PlayerData.Birthday is null ? 0 : 1
+            };
+
+            NotifyNewPlayerTaskStatus notifyNewPlayerTaskStatus = new()
+            {
+                NewPlayerTaskActiveDay = session.player.PlayerData.NewPlayerTaskActiveDay
+            };
+            NotifyPayInfo notifyPayInfo = BuildNotifyPayInfo();
+            PayModule.GrantMailDailyRewards(session, sendPush: false);
+            long mailNow = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            bool mailStateChanged = MailModule.EnsureSystemMails(session.player, mailNow)
+                | MailModule.ReconcileExpiry(session.player, mailNow);
+            NotifyMails notifyMails = MailModule.BuildNotifyMails(session.player, mailNow);
+            if (mailStateChanged)
+                session.player.SaveChecked();
+            NotifyFunctionalEntranceData notifyFunctionalEntranceData = BuildFunctionalEntranceData();
+            PurchaseDailyNotify purchaseDailyNotify = BuildPurchaseDailyNotify();
+            PayModule.AddSignInNotifications(purchaseDailyNotify, session.player);
+            foreach (uint id in session.player.PurchaseDailyPasses.Keys)
+                if (PayModule.RemainingDays(session.player, id) > 0
+                    && session.player.PurchaseDailyPasses[id].LastClaimDay < PayModule.PurchaseDay())
+                    purchaseDailyNotify.DailyRewardInfoList.Add(new Dictionary<string, object> { ["Id"] = id });
+            NotifyPurchaseRecommendConfig purchaseRecommendConfig = BuildPurchaseRecommendConfig();
+            // Seed the manual before NotifyLogin fires login-complete; the late full push refreshes Lotto/Purchase after cache initialization.
+            session.SendPush(WheelchairManualModule.BuildPayload(session, DateTimeOffset.UtcNow));
+            session.SendPush(notifyLogin);
+            if (headTimeout is not null)
+                session.SendPush(headTimeout);
+            session.SendPush(notifyPayInfo);
+            session.SendPush(notifyMails);
+            session.SendPush(new NotifyEquipChipGroupList
+            {
+                ChipGroupDataList = session.player.EquipChipGroups
+            });
+            session.SendPush(BuildEquipChipAutoRecycleNotify(session.player));
+            session.SendPush(new NotifyEquipGuideData()
+            {
+                EquipGuideData = session.player.EquipGuideData ?? new()
+            });
+            session.SendPush(BuildNotifyArchiveLoginData(session.player));
+            session.SendPush(AwarenessModule.BuildLoginData(session.player));
+            session.SendPush(notifyChatLoginData);
+            session.SendPush(new NotifySocialData());
+            session.SendPush(notifyTaskData);
+            session.SendPush(TaskModule.BuildActivenessStatus(session));
+            session.SendPush(notifyNewPlayerTaskStatus);
+            if (IsNewBusinessDay(previousLastLoginTime, currentTime))
+                SignInModule.SendSignInResetPush(session, DateTimeOffset.UtcNow);
+            TaskModule.SendTaskSync(session);
+            session.SendPush(BuildRegressionLoginData());
+            session.SendPush(new NotifyAllRedEnvelope());
+            session.SendPush(new NotifyScoreTitleData { TitleInfos = session.character.ScoreTitles });
+            session.SendPush(BuildBfrtLoginData(session.player));
+            session.SendPush(BiancaTheatreModule.BuildLoginData(session, DateTimeOffset.UtcNow));
+            BiancaTheatreModule.SendRecoveredSettlement(session);
+            session.SendPush(Theatre3Module.BuildLoginData(session));
+            Theatre3Module.SendRecoveredSettlement(session);
+            FangKuaiModule.SendLoginData(session);
+            PunishaarModule.SendLoginData(session);
+            TransfiniteTowerModule.SendLoginData(session);
+            TransfiniteTowerModule.ResumeRankReward(session);
+            MineSweepingModule.Resume(session);
+            TeamRecommendModule.SendLoginState(session);
+            session.SendPush(new NotifyWorkNextRefreshTime()
+            {
+                NextRefreshTime = NextDailyRefreshTime()
+            });
+            session.SendPush(DormModule.BuildLoginData(session));
+            session.SendPush(BuildTrpgLoginData());
+            session.SendPush(BuildMedalLoginData(session.player));
+            session.SendPush(ExploreModule.BuildLoginData(session.player));
+            session.SendPush(notifyGatherRewardList);
+            SendEmptyStartupPush(session, "NotifyNewActivityCalendarData");
+            session.SendPush(notifyAssistData);
+            SendEmptyStartupPush(session, "NotifyDlcFightCharacterId");
+            SendEmptyStartupPush(session, "NotifyDlcChipFormDataList");
+            SendEmptyStartupPush(session, "NotifyDlcChipAssistChipId");
+            session.SendPush(Theatre5Module.BuildLoginData(session));
+            NotifyTheatre6ActivityData? theatre6Data = Theatre6Module.BuildNotify(session.player);
+            if (theatre6Data is not null)
+            {
+                session.SendPush(theatre6Data);
+                Theatre6Module.PushLoginExtras(session);
+            }
+            session.SendPush(session.character.BuildNameplateLoginData());
+            SendEmptyStartupPush(session, "NotifyGuildDormPlayerData");
+            session.SendPush(BuildChatBoardLoginData(session.player));
+            SendEmptyStartupPush(session, "NotifyHoldRegressionData");
+            SendEmptyStartupPush(session, "NotifyHoldRegressionIgnoreChannel");
+            SendEmptyStartupPush(session, "NotifyBountyTaskInfo");
+            SendCurrentEventTaskBatch(session, CurrentEventTaskBatchBounty);
+            session.SendPush(new NotifyFiveTwentyRecord());
+            session.SendPush(purchaseDailyNotify);
+            session.SendPush(purchaseRecommendConfig);
+            session.SendPush(DrawTicketManager.BuildNotify(session.player));
+            SendEmptyStartupPush(session, "NotifyLoginItemCollectionData");
+            session.SendPush(BigWorld.BigWorldModule.BuildMainRedPoint(session.player));
+            session.SendPush(BigWorld.BigWorldModule.BuildExternalRequiredPlayerData(session.player));
+            session.SendPush(BuildCurrentAccumulatedPayData());
+            SendEmptyStartupPush(session, "NotifyAccumulateExpendData");
+            if (arenaResult is not null)
+                session.SendPush(arenaResult);
+            session.SendPush(arenaActivity);
+            SendCurrentEventTaskBatch(session, ArenaModule.CurrentTaskIds(session.player));
+            session.SendPush(new NotifyFubenPrequelData() { FubenPrequelData = new() { RewardedStages = session.stage.PrequelRewardedStages } });
+            session.SendPush(new NotifyPrequelChallengeRefreshTime() { NextRefreshTime = NextDailyRefreshTime() });
+            session.SendPush(new NotifyDailyFubenLoginData() { RefreshTime = NextDailyRefreshTime() });
+            session.SendPush(notifyBirthdayPlot);
+            SendEmptyStartupPush(session, "NotifyBountyChallengeMonsterDifficultyState");
+            session.SendPush(BuildNotifyBriefStoryData(session.player));
+            SendEmptyStartupPush(session, "NotifyCerberusGameData");
+            TowerModule.PrepareLogin(session);
+            SendEmptyStartupPush(session, "NotifyClickClearData");
+            SendEmptyStartupPush(session, "NotifyClientVersion");
+            SendEmptyStartupPush(session, "NotifyColorTableActivityData");
+            SendEmptyStartupPush(session, "NotifyCommunityData");
+            Version47EventModule.SendLoginPushes(session, Version47EventModule.Clock());
+            SendEmptyStartupPush(session, "NotifyCoupletData");
+            session.SendPush(CourseModule.BuildLoginData(session.player));
+            SendEmptyStartupPush(session, "NotifyDoomsdayDbChange");
+            session.SendPush(BuildActivityDrawListPayload(session.player));
+            session.SendPush(BuildActivityDrawGroupCountPayload(session.player));
+            SendEmptyStartupPush(session, "NotifyEscapeData");
+            SendEmptyStartupPush(session, "NotifyExperimentData");
+            NotifyFashionStoryData fashionStoryData = FashionStoryModule.BuildNotify(session);
+            if (fashionStoryData.ActivityId > 0)
+                session.SendPush(fashionStoryData);
+            session.SendPush(HitMouseModule.BuildNotifyHitMouseData(session.player));
+            DyeMergeStagesRecordNotify dyeMergeData = DyeMergeModule.BuildNotify(session.player);
+            if (dyeMergeData.ActivityId > 0)
+                session.SendPush(dyeMergeData);
+            session.SendPush(BossInshotModule.BuildNotifyBossInshotData(session.player));
+            session.SendPush(BossInshotModule.BuildNotifyBossInshotPlayback(session.player));
+            session.SendPush(BossModule.BuildLoginData(session.player, currentTime));
+            NotifyBossActivityData? bossActivityData = BossModule.BuildActivityLoginData(session);
+            if (bossActivityData is not null)
+                session.SendPush(bossActivityData);
+            SendEmptyStartupPush(session, "NotifyFestivalData");
+            SendEmptyStartupPush(session, "NotifyKotodamaData");
+            SendEmptyStartupPush(session, "NotifyMazeData");
+            SendEmptyStartupPush(session, "NotifyMechanismDataDb");
+            StudyProgressModule.SendLoginState(session);
+            session.SendPush(TrialModule.BuildLoginData(session.player));
+            session.SendPush(notifyFunctionalEntranceData);
+            session.SendPush(DrawModule.BuildNotifyDrawCanLiverData(session.player));
+            session.SendPush(DrawModule.BuildNotifyDateALiveDraw());
+            SendEmptyStartupPush(session, "NotifyGame2048DataDb");
+            SendEmptyStartupPush(session, "NotifyGameCollectionData");
+            SendCurrentEventTaskBatch(session, RetroArcadeTaskBatchEntry);
+            SendEmptyStartupPush(session, "NotifyGoldenMinerGameInfo");
+            SendEmptyStartupPush(session, "NotifyGuildSignPlayerData");
+            SendEmptyStartupPush(session, "NotifyItemRestrictLoginData");
+            session.SendPush(LifeTreeModule.BuildNotifyLifeTreeData(session.player));
+            session.SendPush(GachaManager.BuildSelfChoicePayload(session.player));
+            SendEmptyStartupPush(session, "NotifySelfChoiceLottoData");
+            session.SendPush(new NotifyLoginMailCollectionBoxData());
+            SendEmptyStartupPush(session, "NotifyNonogramData");
+            SendEmptyStartupPush(session, "NotifyPivotCombatData");
+            session.SendPush(LoadingModule.BuildLoginData(session.player));
+            session.SendPush(RepeatChallengeModule.BuildLoginData(session.player));
+            SendEmptyStartupPush(session, "NotifyPlayerReportData");
+            session.SendPush(SameColorGameModule.BuildLoginData(session.player));
+            session.SendPush(StrongholdModule.BuildLoginData(session.player));
+            SendEmptyStartupPush(session, "NotifySucceedBossData");
+            SendEmptyStartupPush(session, "NotifyTaikoMasterData");
+            session.SendPush(TheatreModule.BuildLoginData(session));
+            TheatreModule.SendRecoveredSettlement(session);
+            SendCurrentEventTaskBatch(session, RetroArcadeTaskBatchPostTaikoA);
+            SendCurrentEventTaskBatch(session, RetroArcadeTaskBatchPostTaikoB);
+            NotifyTransfiniteData transfiniteData = TransfiniteModule.BuildNotify(session.player);
+            if (transfiniteData.TransfiniteData is not null)
+                session.SendPush(transfiniteData);
+            SendEmptyStartupPush(session, "NotifyTurntableData");
+            session.SendPush(new NotifyVoteData { VoteAlarmDic = session.player.VoteAlarmData });
+            SendEmptyStartupPush(session, "NotifyWheelchairManualActivity");
+            session.SendPush(Theatre4Module.BuildLoginData(session));
+            Theatre4Module.SendRecoveredSettlement(session);
+            SendEmptyStartupPush(session, "NotifyRestaurantData");
+            SendEmptyStartupPush(session, "NotifyBlackRockChessData");
+            SendCurrentEventTaskBatch(session, RetroArcadeTaskBatchPostSubModesA);
+            SendCurrentEventTaskBatch(session, RetroArcadeTaskBatchPostSubModesB);
+            SendCurrentEventTaskBatch(session, RetroArcadeTaskBatchPostSubModesC);
+            SendEmptyStartupPush(session, "NotifyReviewConfig");
+            PassportModule.ReconcileAndPushLogin(session);
+            SendEmptyStartupPush(session, "NotifyMentorData");
+            SendEmptyStartupPush(session, "NotifyMentorChat");
+            SendEmptyStartupPush(session, "NotifyGuildData");
+            session.SendPush(notifyMails);
+            // Seed the home world-chat marquee during the login push stream (before the home
+            // UI builds). Retail relies on live player traffic to populate it, which a
+            // single-player private server never has; without a message present at home-build
+            // time the client never creates the marquee component. (Regressed when the payload
+            // integration moved world-chat delivery to the EnterWorldChatRequest response.)
+            NotifyWorldChat loginWorldChat = new();
+            loginWorldChat.ChatMessages.Add(ChatModule.MakeLuciaWorldMessage($"Hello {session.player.PlayerData.Name}! Welcome to AscNet, please read your mails if you haven't already.\n如果您还没有阅读邮件，请阅读邮件\n\nTry '/help' to get started"));
+            session.SendPush(loginWorldChat);
+            SendEmptyStartupPush(session, "NotifyGuildWarActivityData");
+            SendEmptyStartupPush(session, "NotifyWheelchairManualActivityUpdate");
+
+            ChatModule.FlushPendingLoginChat(session);
+            session.player.Save();
+        }
+
+        private static void RepairProfileCosmeticRewards(Session session)
+        {
+            HashSet<int> claimedGatherRewardIds = session.player.GatherRewards.ToHashSet();
+            bool fashionChanged = false;
+            List<HeadPortraitList> repairedHeads = [];
+            foreach (ExhibitionRewardTable exhibitionReward in TableReaderV2.Parse<ExhibitionRewardTable>().Where(reward =>
+                claimedGatherRewardIds.Contains(reward.Id)
+                && reward.RewardId is > 0))
+            {
+                foreach (var rewardGoods in RewardHandler.GetRewardGoods(exhibitionReward.RewardId!.Value))
+                {
+                    switch (RewardHandler.GetRewardType(rewardGoods))
+                    {
+                        case RewardType.Fashion:
+                            fashionChanged |= RewardHandler.UnlockFashionReward(
+                                rewardGoods.TemplateId,
+                                session,
+                                headPortraits: repairedHeads);
+                            break;
+                        case RewardType.HeadPortrait:
+                            RewardHandler.UnlockHeadPortraitReward(
+                                rewardGoods.TemplateId,
+                                session,
+                                repairedHeads);
+                            break;
+                    }
+                }
+            }
+
+            foreach (HeadPortraitTable head in TableReaderV2.Parse<HeadPortraitTable>().Where(head => head.IsInit == 1))
+                RewardHandler.UnlockHeadPortraitReward(head.Id, session, repairedHeads);
+
+            Dictionary<int, FashionTable> fashions = TableReaderV2.Parse<FashionTable>()
+                .ToDictionary(fashion => fashion.Id);
+            foreach (FashionList ownedFashion in session.character.Fashions.Where(fashion => !fashion.IsLock))
+            {
+                if (ownedFashion.Id <= int.MaxValue
+                    && fashions.TryGetValue((int)ownedFashion.Id, out FashionTable? fashion))
+                {
+                    RewardHandler.UnlockHeadPortraitReward(fashion.GiftId ?? 0, session, repairedHeads);
+                }
+            }
+
+            if (fashionChanged)
+                session.character.Save();
+            if (repairedHeads.Count > 0)
+                session.player.Save();
+        }
+
+
+        private static LoginCharacterList ToLoginCharacter(CharacterData character)
+        {
+            return new LoginCharacterList
+            {
+                Id = character.Id,
+                Level = character.Level,
+                Exp = character.Exp,
+                Quality = character.Quality,
+                InitQuality = character.InitQuality,
+                Star = character.Star,
+                Grade = character.Grade,
+                SkillList = character.SkillList.Select(skill => new SkillList
+                {
+                    Id = skill.Id,
+                    Level = skill.Level
+                }).ToList(),
+                EnhanceSkillList = character.EnhanceSkillList.Cast<dynamic>().ToList(),
+                MagicList = character.MagicList,
+                FashionId = character.FashionId,
+                RandomFashion = character.RandomFashion,
+                CreateTime = character.CreateTime,
+                TrustLv = character.TrustLv,
+                TrustExp = character.TrustExp,
+                Ability = character.Ability,
+                LiberateLv = character.LiberateLv,
+                NewFlag = character.NewFlag,
+                CollectState = character.CollectState,
+                IsEnhanceSkillNotice = character.IsEnhanceSkillNotice,
+                CharacterType = character.CharacterType,
+                CharacterHeadInfo = new()
+                {
+                    HeadFashionId = character.CharacterHeadInfo?.HeadFashionId ?? 0,
+                    HeadFashionType = character.CharacterHeadInfo?.HeadFashionType ?? 0
+                }
+            };
+        }
+    }
+}

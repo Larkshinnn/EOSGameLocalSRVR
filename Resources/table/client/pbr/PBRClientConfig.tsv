@@ -1,0 +1,75 @@
+Key	Values[1]	Values[2]	Values[3]	Values[4]
+MainShowRewardId	69434			
+CommonHelpKey	UiPBRHelp			
+PercentShowFormat	{0}%			
+UiStageMoveDuration	0.2			
+PanelAssetItems	63630			
+StageUnlockTimeFormat	{0} Unlocked			
+StageUnlockPreStageFormat	Requires clearing {0}			
+StageLockOutDateDesc	Stage expired			
+UiStageBoundsLeftOffset	2			
+StageProgressDesc	{0}/{1}			
+SettleSkillSlotCount	3			
+SkillOrbStarIcon	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBgRed01.png	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBlue01.png	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBgYellow01.png	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBgGreen01.png
+SkillOrbStarBgIcon	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBgRed02.png	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBgBlue02.png	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBgYellow02.png	Assets/Product/Texture/Atlas/UiPBR/UiPBRSkillStarBgGreen02.png
+SkillIconLaceColor	F36371	3690FF	F5D463	
+RoleLevelFormat	Lv.{0}			
+ShopRefreshTimesDesc	{0}/{1}			
+ShopSelectGoodsTimesDesc	({0}/{1})			
+ShopNoFreshTimesTips	Item refresh limit reached			
+ShopSelectChoseItemTips	Item already selected			
+ShopSelectItemSuccessTips	Item selected			
+ShopNoChooseTimesTips	Item selection limit reached			
+BattleSettleByHandTips	This stage has not been cleared yet. Leaving now will prevent the next stage from unlocking. Confirm?			
+SettleTitle	Challenge Complete	Challenge failed		
+UIPauseTitle	{0} - Wave {1}			
+ShopFreshSuccessTips	Items refreshed			
+UIMainProgress	{0} - Wave {1}			
+UIShopWavesProgress	Wave {0}			
+RoleAttribShowLabel	{0}	<color=#67ef8a>{0}</color>	<color=#ff4b5a>{0}</color>	
+CollectionTabName	Skill	Item	Enemy	
+CollectionMonsterTypeLabel	Normal	ELITE	<color=#FFFFFF>Boss</color>	
+CollectionTitleWithLock	???			
+CharacterUnlockDesc	Unlocks after clearing Stage {0}			
+StageEnterFailWithLockChar	Character locked. Cannot enter battle.			
+CollectionSummaryTitleDesc				
+CollectionPercentShowFormat	{0}%			
+CollectionSortTypeName	Sort: Default	Sort: Latest	Sort: Rarity	
+GeniusPreNodeUnlockTips	Prerequisite node locked			
+GeniusUnlockSuccessTips	Node unlocked			
+GeniusNodeUnlockCostLimitTips	Insufficient tokens to unlock			
+GeniusRewardTitleDesc	Unlocks:	Unlocked:		
+GeniusCostDesc	{0}	<color=#FF0000>{0}</color>		
+GeniusDragAreaFocusTime	1			
+ShopSelectSkillSameColorDiffGroupTips	This will replace your current skill of the same color. Confirm?			
+ShopGiveUpWithLastChooseTime	Give up this enhancement opportunity and move on to the next wave			
+ShopGiveUpWithMultyChooseTime	Give up this enhancement opportunity and refresh all items			
+ItemCountFormat	X{0}			
+ShopDialogHintDesc	Do not show again during this battle			
+SettleStageNameDesc	[Stage {0}]			
+UiChapterAnimDelayTime	1			
+UiChapterGridAnimInterval	0.1			
+SettleForceTips	Previous game abandoned			
+BattleShopBackTips	Game paused. Next time you enter, you'll return to the Shop.	Exit and Settle	Save and Leave	
+CalibrateBgmId	1			
+CalibrateOffsetRange	500			
+CalibrateAutoSampleCount	5			
+CalibrateAutoResultTips	Calibration complete. Recommended latency: {0} ms			
+CalibrateAutoResultApplyTips	Calibration deviation value saved successfully			
+CalibrateShadowDurationMs	1000			
+FeverCount	Combo			
+PBRSkinTaskId	140260			
+PBRPopupSkinCheckGuide	0			
+PBRSkinTaskTabIndex	1			
+PBRSkinFocusTaskId	140264			
+RangePickupDropRectEffect				
+RangePickupDropCircleEffect				
+BtnFeverActiveBgColor	fda0ff			
+BtnFeverInactiveBgColor	4891ff			
+RangePickupDropRedBallTrail	FxChaJianDiaoLuoRedTrail			
+RangePickupDropBlueBallTrail	FxChaJianDiaoLuoBlueTrail			
+RangePickupDropYellowBallTrail	FxChaJianDiaoLuoOrangeTrail			
+RangePickupDropCommonTrail	FxChaJianDiaoLuoBlueTrail			
+StageNameInSelection	Stage {0}			
+IpadResolutionLimit	1.4			
+ShopGiveUpSuccessTips	Successful			

@@ -1,0 +1,34 @@
+StatsId	StatsName	StatsDesc	ValueBase	ShowPriority	MaxValue	Icon	IsHide	FightValueSrc
+11	Basic Attack DMG Bonus	角色初始普攻伤害百分比	1	30	99999900	Assets/Product/Texture/Atlas/UiPBR/IconBasicAttackDmg.png		
+12	Signal Orb DMG Bonus	角色初始信号球伤害百分比	1	29	99999900	Assets/Product/Texture/Atlas/UiPBR/IconSignalOrbsDmg.png		
+45	CRIT	角色初始暴击几率百分比	1	28	10000	Assets/Product/Texture/Atlas/UiPBR/IconCritRate.png		
+46	CRIT DMG	角色初始暴击伤害百分比	1	27	99999900	Assets/Product/Texture/Atlas/UiPBR/IconCritDmg.png		
+75	Range	角色普攻射程单位距离		16	99999	Assets/Product/Texture/Atlas/UiPBR/IconBasicAttackRange.png		
+21	Normal Attack Targeting Range	角色普攻射程基础值		7	99999		1	
+154	Red Orb Drop Rate	角色普攻命中时红球掉率百分比	1	24	99999900	Assets/Product/Texture/Atlas/UiPBR/IconRedOrbsAttackDropRate.png		
+155	Blue Orb Drop Rate	角色普攻命中时黄球掉率百分比	1	22	99999900	Assets/Product/Texture/Atlas/UiPBR/IconBlueOrbsAttackDropRate.png		
+156	Yellow Orb Drop Rate	角色普攻命中时蓝球掉率百分比	1	23	99999900	Assets/Product/Texture/Atlas/UiPBR/IconYellowOrbsAttackDropRate.png		
+77	Combo Duration	角色连锁增幅效果持续窗口时长		8	99999	Assets/Product/Texture/Atlas/UiPBR/IconComboBoostWindow.png		
+78	Knockback	角色普攻击退距离		9	99999	Assets/Product/Texture/Atlas/UiPBR/IconBasicAttackKnockback.png		
+49	Lifesteal Efficiency	角色吸血概率百分比	1	21	2000	Assets/Product/Texture/Atlas/UiPBR/IconLifestealRate.png		
+19	Lifesteal Efficiency Limit	角色吸血概率百分比上限	1	20	2000	Assets/Product/Texture/Atlas/UiPBR/IconLifestealRateLimit.png		
+144	Dodge	角色闪避概率百分比	1	19	6000	Assets/Product/Texture/Atlas/UiPBR/IconDodgeRate.png		
+20	Dodge Gauge Limit	角色闪避概率百分比上限	1	18	6000	Assets/Product/Texture/Atlas/UiPBR/IconDodgeRateLimit.png		
+3	Speed	角色移动速度		17	999999	Assets/Product/Texture/Atlas/UiPBR/IconMoveSpeed.png		
+1	Max HP	角色最大生命值		26	999999	Assets/Product/Texture/Atlas/UiPBR/IconMaxHP.png		1
+17	HP Growth	角色每级固定增加的生命值		25	999999	Assets/Product/Texture/Atlas/UiPBR/IconHpPerLevel.png		
+33	Armor	角色护甲值		15	999999	Assets/Product/Texture/Atlas/UiPBR/IconArmor.png		
+145	Luck	角色幸运值		14	999999	Assets/Product/Texture/Atlas/UiPBR/IconLuck.png		
+147	Attack Speed Bonus	角色普攻攻速加成百分比	1	13	40000	Assets/Product/Texture/Atlas/UiPBR/IconBasicAttackSpeedRate.png		
+146	Penetration	角色贯穿		12	999	Assets/Product/Texture/Atlas/UiPBR/IconPierceNum.png		
+56	Sprint Charge	角色冲刺充能次数上限	1	11	9999999	Assets/Product/Texture/Atlas/UiPBR/IconDashLimitNum.png		
+55	Sprint Charge limit (200000/use)	角色初始冲刺充能次数		10	4000000	Assets/Product/Texture/Atlas/UiPBR/IconDashInitialNum.png	1	
+50	Speed	怪物图鉴用碰撞伤害显示		56	99999900	Assets/Product/Texture/Atlas/UiPBR/IconMoveSpeed.png	1	
+51	Health	怪物图鉴用血量显示		57	99999900		1	
+52	Collision DMG	怪物图鉴用移动速度显示		58	99999900		1	
+58	Auto Pickup Range	Auto Pickup Range		3	999999	Assets/Product/Texture/Atlas/UiPBR/FightSaoMiao02.png		
+59	Armor (Fever)	Armor (Fever)		5	999999	Assets/Product/Texture/Atlas/UiPBR/IconFeverArmor.png		
+60	Damage Boost (Fever)	Damage Boost (Fever)	1	6	99999900	Assets/Product/Texture/Atlas/UiPBR/IconFeverBasicAttackDmg.png		
+61	Duration (Fever)	Duration (Fever)		2	999999	Assets/Product/Texture/Atlas/UiPBR/IconFeverComboBoostWindow.png	1	
+62	Cooldown (Fever)	Cooldown (Fever)		1	999999	Assets/Product/Texture/Atlas/UiPBR/IconFeverComboBoostWindow.png	1	
+63	Lifesteal (Fever)	Lifesteal (Fever)	1	4	99999900	Assets/Product/Texture/Atlas/UiPBR/IconFeverLifestealRate.png		

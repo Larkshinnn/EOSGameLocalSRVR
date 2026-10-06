@@ -1,0 +1,5 @@
+Id	OpenTarget	ModelId	ModelPlayingId	ModelLockedId	CharacterAnimationId	BGMTrackControlName
+1	30	QixiCharPiano	QixiCharPiano	QixiCharPianoLocked	QixiCharPianoAni	MusicTrack_Volume_3
+2	23	QixiCharGuitarPlaying	QixiCharGuitar	QixiCharGuitarLocked	QixiCharGuitarAni	MusicTrack_Volume_4
+3	9	QixiCharDoubleBassPlaying	QixiCharDoubleBass	QixiCharDoubleBassLocked	QixiCharDoubleBassAni	MusicTrack_Volume_2
+4	16	QixiCharDrum	QixiCharDrum	QixiCharDrumLocked	QixiCharDrumAni	MusicTrack_Volume_1

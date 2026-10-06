@@ -1,0 +1,12 @@
+Id	CueId	Name	Duration	BeatsPerLoop	AccentBeatIndex	BeatsPerMinute	HitWindowFrames	CoverImg	Offset
+1	7194	Calibration Theme	8000	4	3	120.0	8	Assets/Product/Texture/Image/IconTools/IconActivityPointQuest2001001.png	
+2	7221	"Blazing Rhapsody" Theme Song: Collision Beats	106666	4	1	117.62	8	Assets/Product/Texture/Image/UiPBR/CdFace161.png	50
+3	7222	[Frozen Darkness] Battle Theme	130869	4	1	139.5299	6	Assets/Product/Texture/Image/UiPBR/CdFace1.png	720
+4	7223	[The Last Spark] Battle Theme	96214	4	1	139.5299	6	Assets/Product/Texture/Image/UiPBR/CdFace17.png	220
+5	7224	[The Ark Beyond] Battle Theme	115217	4	2	139.5299	6	Assets/Product/Texture/Image/UiPBR/CdFace28.png	460
+6	7225	[Across the Ruined Sea] Battle Theme	121875	4	4	127.66	6	Assets/Product/Texture/Image/UiPBR/CdFace37.png	380
+7	7226	[Spiral of Chronos] Battle Theme	152727	4	3	109.0899	8	Assets/Product/Texture/Image/UiPBR/CdFace49.png	560
+8	7227	[Source Beacon] Battle Theme	160800	4	3	100.0	8	Assets/Product/Texture/Image/UiPBR/CdFace84.png	1240
+9	7228	[Dream till the Timeless End] Battle Theme	76361	4	1	109.0899	8	Assets/Product/Texture/Image/UiPBR/CdFace121.png	1680
+10	7229	[Butter Coffee Wonders] Theme Song	76411	4	3	95.2399	8	Assets/Product/Texture/Image/UiPBR/CdFace36.png	670
+11	7230	[Homecoming Voyage] EP Down the Cursed Path	109714	4	1	173.91	5	Assets/Product/Texture/Image/UiPBR/CdFace157.png	20

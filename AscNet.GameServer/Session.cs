@@ -1,0 +1,704 @@
+using System.Collections.Concurrent;
+using System.Buffers.Binary;
+using System.Net.Sockets;
+using System.Reflection.Emit;
+using AscNet.Common;
+using AscNet.Common.MsgPack;
+using AscNet.Common.Database;
+using AscNet.Common.Util;
+using AscNet.GameServer.Game;
+using AscNet.Logging;
+using MessagePack;
+using Newtonsoft.Json;
+using Logger = AscNet.Logging.Logger;
+
+namespace AscNet.GameServer
+{
+    public partial class Session
+    {
+        public readonly string id;
+        public readonly TcpClient client;
+        public Player player = default!;
+        public Character character = default!;
+        public Stage stage = default!;
+        public Fight? fight;
+        public int? OpenedGuideGroupId;
+        // Regional build identity from HandshakeRequest; null until the client handshakes.
+        public string? ClientDocumentVersion;
+        public string? ClientApplicationVersion;
+        public BossSinglePendingScore? PendingBossSingleScore;
+        public HashSet<int> PendingBossSingleRolloverStageIds { get; } = [];
+        public Inventory inventory = default!;
+        public int? PendingEnterWorldChatRequestId;
+        public int? PendingGetWorldChannelInfoRequestId;
+        // BigWorld: set by DlcWorldSaveData in online engine mode, drained by LoadCompleteRequest.
+        public bool PendingBigWorldLoadCompleteXRpc;
+        public bool PendingBigWorldStartFightNotify;
+        // BigWorld world the session is inside (0 = not in BigWorld) and when its fight snapshot was built.
+        public int BigWorldWorldId;
+        public DateTime BigWorldFightStartedAt;
+        public readonly Dictionary<(uint EquipId, int Slot), ResonanceInfo> PendingEquipResonances = new();
+        public int? AppliedTeamPrefabId;
+        public readonly Dictionary<uint, (uint FashionId, int WeaponFashionId)> RandomFashionRolls = new();
+        internal Dictionary<int, (int Value, int State)>? TaskSnapshotProgress;
+        internal bool GuildIdentityReady;
+        public readonly Logger log;
+        private int startState;
+        private int packetNo = 0;
+        private int disconnectState;
+        private const int InitialReceiveBufferLength = 1 << 16;
+        private const int MaxReceivePacketLength = PacketCodec.MaxFrameLength;
+        private static readonly object BigWorldPacketDumpLock = new();
+        private readonly object outboundLock = new();
+        private readonly PacketWriter writer;
+        private static readonly ConcurrentDictionary<long, object> PlayerOperationLocks = new();
+        public Task Completion { get; private set; } = Task.CompletedTask;
+        private static long BigWorldPacketDumpOrdinal;
+        private static readonly string BigWorldPacketDumpRootDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".runtime"));
+        private static readonly string DefaultBigWorldPacketDumpDirectory = Path.Combine(BigWorldPacketDumpRootDirectory, "bigworld-packet-dumps");
+
+
+        public Session(string id, TcpClient tcpClient)
+        {
+            this.id = id;
+            client = tcpClient;
+            // TODO: add session based configuration? maybe from database?
+            log = new(typeof(Session), id, LogLevel.DEBUG, LogLevel.DEBUG);
+            log.LogLevelColor[LogLevel.INFO] = ConsoleColor.Cyan;
+            writer = new PacketWriter(client, exception =>
+            {
+                if (exception is not null)
+                    log.Warn("Outbound packet delivery failed; disconnecting peer.", exception);
+                DisconnectProtocol();
+            });
+        }
+
+        public void Start()
+        {
+            if (Interlocked.Exchange(ref startState, 1) != 0)
+                throw new InvalidOperationException("Session has already been started.");
+
+            Completion = ClientLoop();
+        }
+
+        internal static object GetPlayerOperationLock(long playerId) =>
+            PlayerOperationLocks.GetOrAdd(playerId, static _ => new object());
+
+        private void InvokeRequestHandler(
+            RequestPacketHandlerDelegate requestPacketHandler,
+            Packet.Request request)
+        {
+            // ponytail: all dispatch shares one guild gate, including login and post-hooks;
+            // replace with proven operation routing if cross-player throughput becomes a bottleneck.
+            lock (Handlers.GuildModule.MembershipLock)
+                InvokeRequestHandlerLocked(requestPacketHandler, request);
+        }
+
+        private void InvokeRequestHandlerLocked(
+            RequestPacketHandlerDelegate requestPacketHandler,
+            Packet.Request request)
+        {
+            using IDisposable metrics = MongoCommandMetrics.Begin(request.Name);
+            Player? currentPlayer = player;
+            if (currentPlayer is null)
+            {
+                if (Volatile.Read(ref disconnectState) == 0)
+                {
+                    requestPacketHandler.Invoke(this, request);
+                    if (player is not null && Volatile.Read(ref disconnectState) == 0)
+                    {
+                        lock (GetPlayerOperationLock(player.PlayerData.Id))
+                        {
+                            Handlers.TaskModule.SendSnapshotTaskSync(this);
+                            ReconcileArchiveAfterRequest();
+                        }
+                    }
+                }
+                return;
+            }
+
+            if (Volatile.Read(ref disconnectState) != 0)
+                return;
+            // Dispatch already holds MembershipLock. Reject foreign progress before
+            // participant recovery or reset can change the pending owner's epoch.
+            if (request.Name is not ("LoginRequest" or "HandshakeRequest")
+                && ((currentPlayer.Theatre5.PendingMutation is { } pending
+                        && pending.ResponseName is not (nameof(Handlers.FinishTaskResponse) or nameof(Handlers.FinishMultiTaskResponse))
+                        && !Handlers.Theatre5Module.CanDispatchPendingRequest(this, request))
+                    || (currentPlayer.Theatre4.PendingMutation is { } tundraPending
+                        && tundraPending.ResponseName is not (nameof(Handlers.FinishTaskResponse) or nameof(Handlers.FinishMultiTaskResponse))
+                        && !Handlers.Theatre4Module.CanDispatchPendingRequest(this, request))
+                    || (currentPlayer.Theatre6.PendingMutation is not null
+                        && !Handlers.Theatre6Module.CanDispatchPendingRequest(this, request))
+                    || (currentPlayer.PendingPartnerDecompose is not null
+                        && request.Name is not ("PartnerDecomposeRequest" or "ReconnectRequest"))))
+            {
+                string responseName = request.Name.EndsWith("Request", StringComparison.Ordinal)
+                    ? request.Name[..^7] + "Response" : request.Name + "Response";
+                SendResponse(responseName, MessagePackSerializer.Serialize(new Dictionary<string, int> { ["Code"] = 1 }), request.Id);
+                return;
+            }
+            Handlers.GuildModule.RecoverParticipant(this, currentPlayer.PlayerData.Id);
+            if (request.Name is not ("LoginRequest" or "HandshakeRequest"))
+                Handlers.Theatre6PvpModule.RecoverPendingDefense(this);
+
+            lock (GetPlayerOperationLock(currentPlayer.PlayerData.Id))
+            {
+                if (Volatile.Read(ref disconnectState) == 0)
+                {
+                    if (request.Name is not ("LoginRequest" or "HandshakeRequest"))
+                    {
+                        if (player.MineSweeping?.Pending is not null && !Handlers.MineSweepingModule.RecoverPending(this))
+                        {
+                            string responseName = request.Name.EndsWith("Request", StringComparison.Ordinal)
+                                ? request.Name[..^7] + "Response" : request.Name + "Response";
+                            SendResponse(responseName, MessagePackSerializer.Serialize(new Dictionary<string, int> { ["Code"] = 1 }), request.Id);
+                            return;
+                        }
+                        if (request.Name != "ItemBuyAssetRequest" && player.PendingBuyAsset is not null)
+                            Handlers.ItemModule.ResumePendingBuyAsset(this);
+                        if (request.Name != "DrawDrawCardRequest" && player.DrawState?.PendingDraw is not null)
+                            Handlers.DrawModule.ResumePendingDraw(this);
+                    }
+                    // Task handlers reconcile journals after identifying the owner, preserving Bianca's pending-intent guard.
+                    // Other requests must recover and reset here before they can record new-period gameplay progress.
+                    if (character is not null && inventory is not null && stage is not null
+                        && request.Name is not ("FinishTaskRequest" or "FinishMultiTaskRequest")
+                        && !(request.Name == "BuyRequest"
+                            && currentPlayer.Theatre.PendingMutation?.ResponseName == nameof(Handlers.BuyResponse)
+                            && Handlers.TheatreModule.IsCommonShop(request.Deserialize<Handlers.BuyRequest>().ShopId)))
+                        Handlers.TaskModule.EnsureMissionResets(this);
+                    requestPacketHandler.Invoke(this, request);
+                    if (Volatile.Read(ref disconnectState) == 0)
+                    {
+                        Handlers.TaskModule.SendSnapshotTaskSync(this);
+                        ReconcileArchiveAfterRequest();
+                    }
+                }
+            }
+        }
+
+        private void ReconcileArchiveAfterRequest()
+        {
+            try
+            {
+                Handlers.ArchiveCgModule.Reconcile(this, notify: true);
+            }
+            catch (MongoDB.Driver.MongoException exception)
+            {
+                // The request has already replied; rolled-back unlocks are retried after the next request.
+                log.Warn("Archive CG reconciliation could not be saved; leaving unlocks pending.", exception);
+            }
+        }
+
+        private async Task ClientLoop()
+        {
+            NetworkStream stream;
+            try
+            {
+                stream = client.GetStream();
+            }
+            catch (ObjectDisposedException)
+            {
+                DisconnectProtocol();
+                await writer.CompleteAsync();
+                return;
+            }
+            catch (InvalidOperationException) when (!client.Connected)
+            {
+                DisconnectProtocol();
+                await writer.CompleteAsync();
+                return;
+            }
+            int prevBuf = 0;
+            byte[] msg = new byte[InitialReceiveBufferLength];
+
+            while (Volatile.Read(ref disconnectState) == 0)
+            {
+                try
+                {
+                    using CancellationTokenSource idleTimeout = new(TimeSpan.FromSeconds(10));
+                    int len = await stream.ReadAsync(
+                        msg.AsMemory(prevBuf, msg.Length - prevBuf),
+                        idleTimeout.Token);
+                    if (len <= 0)
+                        break;
+
+                    prevBuf += len;
+
+                    if (prevBuf > 0)
+                    {
+                        List<Packet> packets = new();
+
+                        int readbytes = 0;
+                        while (readbytes < prevBuf)
+                        {
+                            int remainingBytes = prevBuf - readbytes;
+                            if (remainingBytes < 4)
+                                break;
+
+                            int packetLen = BinaryPrimitives.ReadInt32LittleEndian(msg.AsSpan(readbytes, 4));
+                            if (packetLen < 1)
+                            {
+                                prevBuf = 0;
+                                readbytes = 0;
+                                break;
+                            }
+
+                            if (packetLen > MaxReceivePacketLength)
+                            {
+                                log.Error($"Packet length {packetLen} exceeds maximum receive packet length {MaxReceivePacketLength}");
+                                throw new InvalidDataException($"Packet length {packetLen} exceeds maximum receive packet length {MaxReceivePacketLength}");
+                            }
+
+                            if (packetLen > msg.Length - sizeof(int))
+                            {
+                                GrowReceiveBufferForPacket(ref msg, packetLen);
+                                break;
+                            }
+
+                            if (packetLen > remainingBytes - sizeof(int))
+                                break;
+
+                            readbytes += 4;
+                            byte[] packet = GC.AllocateUninitializedArray<byte>(packetLen);
+                            Array.Copy(msg, readbytes, packet, 0, packetLen);
+                            readbytes += packetLen;
+
+                            try
+                            {
+                                packets.Add(PacketCodec.Decode(packet));
+                            }
+                            catch (Exception ex)
+                            {
+                                log.Error($"Failed to deserialize packet: packetBytes={packetLen}, bufferedBytes={prevBuf}, error={ex.GetType().Name}");
+                            }
+                        }
+
+                        if (readbytes > 0)
+                        {
+                            int unreadBytes = prevBuf - readbytes;
+                            if (unreadBytes > 0)
+                                Buffer.BlockCopy(msg, readbytes, msg, 0, unreadBytes);
+                            prevBuf = unreadBytes;
+                        }
+                        else if (prevBuf == msg.Length)
+                        {
+                            int pendingPacketLen = prevBuf >= sizeof(int)
+                                ? BinaryPrimitives.ReadInt32LittleEndian(msg.AsSpan(0, sizeof(int)))
+                                : 0;
+                            log.Error($"Receive buffer filled without a complete packet; bufferedBytes={prevBuf}, pendingPacketLen={pendingPacketLen}");
+                            throw new InvalidDataException($"Receive buffer filled without a complete packet; bufferedBytes={prevBuf}, pendingPacketLen={pendingPacketLen}");
+                        }
+
+                        foreach (var packet in packets)
+                        {
+                            try
+                            {
+                                switch (packet.Type)
+                                {
+                                    case Packet.ContentType.Request:
+                                        Packet.Request request = MessagePackSerializer.Deserialize<Packet.Request>(packet.Content, Packet.InboundOptions);
+                                        string requestName = request.Name ?? string.Empty;
+                                        ProbeBigWorldPacket("in", requestName, request.Content ?? [], request.Id, 0);
+                                        RequestPacketHandlerDelegate? requestPacketHandler = PacketFactory.GetRequestPacketHandler(requestName);
+                                        if (requestPacketHandler is not null)
+                                        {
+                                            // TODO: with new logger this will be unnecessary
+                                            if (Common.Common.config.VerboseLevel > VerboseLevel.Silent)
+                                                log.Info($"Request received: nameLength={request.Name?.Length ?? 0}, contentBytes={request.Content?.Length ?? 0}, id={request.Id}");
+                                            InvokeRequestHandler(requestPacketHandler, request);
+                                        }
+                                        else
+                                        {
+                                            if (Common.Common.config.VerboseLevel > VerboseLevel.Silent)
+                                                log.Warn($"Request handler not found: name={System.Text.Json.JsonSerializer.Serialize(request.Name is { Length: > 128 } ? request.Name[..128] : request.Name)}, nameLength={request.Name?.Length ?? 0}, contentBytes={request.Content?.Length ?? 0}, id={request.Id}");
+                                        }
+                                        break;
+
+                                    case Packet.ContentType.Push:
+                                        Packet.Push push = MessagePackSerializer.Deserialize<Packet.Push>(packet.Content, Packet.InboundOptions);
+                                        if (Common.Common.config.VerboseLevel > VerboseLevel.Silent)
+                                        {
+                                            if (IsKnownClientPush(push.Name))
+                                                log.Info($"Known client push received: nameLength={push.Name?.Length ?? 0}, contentBytes={push.Content?.Length ?? 0}");
+                                            else
+                                                log.Warn($"Client push ignored: nameLength={push.Name?.Length ?? 0}, contentBytes={push.Content?.Length ?? 0}");
+                                        }
+                                        break;
+
+                                    case Packet.ContentType.Exception:
+                                        Packet.Exception exception = MessagePackSerializer.Deserialize<Packet.Exception>(packet.Content, Packet.InboundOptions);
+                                        log.Error($"Exception packet received: code={exception.Code}, id={exception.Id}");
+                                        break;
+
+                                    default:
+                                        log.Error($"Unknown packet received: type={(int)packet.Type}, contentBytes={packet.Content?.Length ?? 0}");
+                                        break;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                log.Error($"Failed to invoke handler: type={(int)packet.Type}, contentBytes={packet.Content?.Length ?? 0}, error={ex.GetType().Name}: {ex.Message}");
+                            }
+                        }
+                    }
+
+                }
+                catch (Exception)
+                {
+                    break;
+                }
+            }
+
+            DisconnectProtocol();
+            await writer.CompleteAsync();
+        }
+
+        private void GrowReceiveBufferForPacket(ref byte[] buffer, int packetLen)
+        {
+            int requiredLength = checked(packetLen + sizeof(int));
+            int newLength = buffer.Length;
+            while (newLength < requiredLength)
+            {
+                int doubledLength = newLength << 1;
+                if (doubledLength <= 0 || doubledLength > MaxReceivePacketLength + sizeof(int))
+                {
+                    newLength = MaxReceivePacketLength + sizeof(int);
+                    break;
+                }
+
+                newLength = doubledLength;
+            }
+
+            if (newLength < requiredLength)
+                newLength = requiredLength;
+
+            log.Debug($"Growing receive buffer from {buffer.Length} to {newLength} for packetLen={packetLen}");
+            Array.Resize(ref buffer, newLength);
+        }
+
+        public static bool IsKnownClientPush(string name)
+        {
+            return name switch
+            {
+                "BoardMutualRequest" => true,
+                "ReconnectAck" => true,
+                "DormOutRequest" => true,
+                _ => false
+            };
+        }
+
+        public void ContinuePushSequenceFrom(int lastMsgSeqNo)
+        {
+            lock (outboundLock)
+            {
+                if (lastMsgSeqNo > packetNo)
+                    packetNo = lastMsgSeqNo;
+            }
+        }
+
+        public void SendPush<T>(T push) where T : new()
+        {
+            Packet.Push packet = new()
+            {
+                Name = typeof(T).Name,
+                Content = MessagePackSerializer.Serialize(push)
+            };
+            lock (outboundLock)
+            {
+                ProbeBigWorldPacket("push", packet.Name, packet.Content, null, packetNo + 1);
+                ProbeEquipmentPush(packet.Name, push);
+                Send(new Packet()
+                {
+                    No = ++packetNo,
+                    Type = Packet.ContentType.Push,
+                    Content = MessagePackSerializer.Serialize(packet)
+                });
+            }
+            if (Common.Common.config.VerboseLevel > VerboseLevel.Silent)
+                log.Info($"{packet.Name}{(Common.Common.config.VerboseLevel >= VerboseLevel.Debug ? (", " + JsonConvert.SerializeObject(push)) : "")}");
+        }
+
+        public void SendPush(string name, byte[] push)
+        {
+            Packet.Push packet = new()
+            {
+                Name = name,
+                Content = push
+            };
+            lock (outboundLock)
+            {
+                ProbeBigWorldPacket("push", packet.Name, packet.Content, null, packetNo + 1);
+                ProbeEquipmentPush(name, push);
+                Send(new Packet()
+                {
+                    No = ++packetNo,
+                    Type = Packet.ContentType.Push,
+                    Content = MessagePackSerializer.Serialize(packet)
+                });
+            }
+            if (Common.Common.config.VerboseLevel > VerboseLevel.Silent)
+                log.Info($"{name}{(Common.Common.config.VerboseLevel >= VerboseLevel.Debug ? (", " + FormatMessagePackContent(push)) : "")}");
+        }
+
+        private static readonly object EquipmentPushProbeLock = new();
+        private static readonly string EquipmentPushProbePath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".runtime", "equip-push-live.log"));
+
+        private void ProbeEquipmentPush<T>(string name, T push)
+        {
+            string? value = Environment.GetEnvironmentVariable("ASCNET_EQUIP_PUSH_LOG");
+            if (!string.Equals(value, "1", StringComparison.Ordinal)
+                && !string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase))
+                return;
+            string? summary = name switch
+            {
+                nameof(NotifyLogin) when push is NotifyLogin notifyLogin => DescribeEquipList(notifyLogin.EquipList),
+                nameof(NotifyEquipDataList) when push is NotifyEquipDataList notifyEquipDataList => DescribeEquipList(notifyEquipDataList.EquipDataList),
+                _ when name.StartsWith("NotifyEquip", StringComparison.Ordinal) => push is byte[] bytes ? $"rawBytes={bytes.Length}" : $"payloadType={typeof(T).FullName}",
+                _ => null
+            };
+
+            if (summary is null)
+                return;
+
+            try
+            {
+                string? directory = Path.GetDirectoryName(EquipmentPushProbePath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                    Directory.CreateDirectory(directory);
+
+                string line = $"{DateTimeOffset.Now:O} session={id} packetNo={packetNo + 1} push={name} {summary}{Environment.NewLine}";
+                lock (EquipmentPushProbeLock)
+                {
+                    File.AppendAllText(EquipmentPushProbePath, line);
+                }
+            }
+            catch
+            {
+                // Probe logging must never affect gameplay packet delivery.
+            }
+        }
+
+        private void ProbeBigWorldPacket(string direction, string name, byte[] content, int? requestId, int outerPacketNo)
+        {
+            if (!ShouldDumpBigWorldPacket(name) || !IsBigWorldPacketDumpEnabled())
+                return;
+
+            try
+            {
+                string dumpDirectory = GetBigWorldPacketDumpDirectory();
+                Directory.CreateDirectory(dumpDirectory);
+                long ordinal = System.Threading.Interlocked.Increment(ref BigWorldPacketDumpOrdinal);
+                string timestamp = DateTimeOffset.UtcNow.ToString("yyyyMMddTHHmmss.fffffffZ");
+                string baseName = $"{timestamp}-{ordinal:D6}-{SanitizeDumpFileSegment(id)}-{SanitizeDumpFileSegment(direction)}-{SanitizeDumpFileSegment(name)}";
+                string msgpackPath = Path.Combine(dumpDirectory, baseName + ".msgpack");
+                string jsonPath = Path.Combine(dumpDirectory, baseName + ".json");
+                string indexPath = Path.Combine(dumpDirectory, "index.jsonl");
+                string line = JsonConvert.SerializeObject(new
+                {
+                    Timestamp = DateTimeOffset.UtcNow.ToString("O"),
+                    SessionId = id,
+                    Direction = direction,
+                    Name = name,
+                    RequestId = requestId,
+                    OuterPacketNo = outerPacketNo,
+                    PayloadBytes = content.Length,
+                    MessagePackPath = msgpackPath,
+                    JsonPath = jsonPath
+                }) + Environment.NewLine;
+
+                lock (BigWorldPacketDumpLock)
+                {
+                    File.WriteAllBytes(msgpackPath, content);
+                    File.WriteAllText(jsonPath, FormatMessagePackContent(content));
+                    File.AppendAllText(indexPath, line);
+                }
+            }
+            catch (Exception ex)
+            {
+                log.Warn($"BigWorld packet dump failed: {ex.GetType().Name}");
+            }
+        }
+
+        private static bool IsBigWorldPacketDumpEnabled()
+        {
+            string? value = Environment.GetEnvironmentVariable("ASCNET_DUMP_BIGWORLD_PACKETS")
+                ?? Environment.GetEnvironmentVariable("ASCNET_DUMP_BIGWORLD");
+            return string.Equals(value, "1", StringComparison.Ordinal)
+                || string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string GetBigWorldPacketDumpDirectory()
+        {
+            string? configured = Environment.GetEnvironmentVariable("ASCNET_DUMP_BIGWORLD_DIR");
+            if (string.IsNullOrWhiteSpace(configured))
+                return DefaultBigWorldPacketDumpDirectory;
+
+            return Path.IsPathRooted(configured)
+                ? Path.GetFullPath(configured)
+                : Path.GetFullPath(Path.Combine(BigWorldPacketDumpRootDirectory, configured));
+        }
+
+        private static bool ShouldDumpBigWorldPacket(string name)
+        {
+            return name.Contains("BigWorld", StringComparison.Ordinal)
+                || name.StartsWith("Dlc", StringComparison.Ordinal)
+                || name.StartsWith("NotifyDlc", StringComparison.Ordinal)
+                || name.StartsWith("NotifySg", StringComparison.Ordinal)
+                || name.StartsWith("LeaveInstLevel", StringComparison.Ordinal)
+                || name.StartsWith("XRpc", StringComparison.Ordinal)
+                || name is "NotifyTask"
+                    or "StartFightNotify"
+                    or "LoadCompleteRequest"
+                    or "LoadCompleteResponse"
+                    or "EnterInstLevelRequest"
+                    or "EnterInstLevelResponse"
+                    or "LeaveWorldRequest"
+                    or "LeaveWorldResponse";
+        }
+
+        private static string SanitizeDumpFileSegment(string value)
+        {
+            return new string(value.Select(static c => char.IsLetterOrDigit(c) || c is '-' or '_' or '.' ? c : '_').ToArray());
+        }
+
+        private static string DescribeEquipList(IReadOnlyCollection<EquipData>? equips)
+        {
+            if (equips is null)
+                return "equipCount=null";
+
+            if (equips.Count == 0)
+                return "equipCount=0";
+
+            uint minId = equips.Min(equip => equip.Id);
+            uint maxId = equips.Max(equip => equip.Id);
+            int recycledCount = equips.Count(equip => equip.IsRecycle);
+            string templates = string.Join(",", equips.Take(24).Select(equip => equip.TemplateId));
+            if (equips.Count > 24)
+                templates += ",...";
+
+            return $"equipCount={equips.Count} minId={minId} maxId={maxId} recycled={recycledCount} templates={templates}";
+        }
+
+        public void SendResponse<T>(T response, int clientSeq = 0) where T : new()
+        {
+            Packet.Response packet = new()
+            {
+                Id = clientSeq,
+                Name = typeof(T).Name,
+                Content = MessagePackSerializer.Serialize(response)
+            };
+            ProbeBigWorldPacket("response", packet.Name, packet.Content, packet.Id, 0);
+            Send(new Packet()
+            {
+                No = 0,
+                Type = Packet.ContentType.Response,
+                Content = MessagePackSerializer.Serialize(packet)
+            });
+            if (Common.Common.config.VerboseLevel > VerboseLevel.Silent)
+                log.Info($"{packet.Name}{(Common.Common.config.VerboseLevel >= VerboseLevel.Debug ? (", " + JsonConvert.SerializeObject(response)) : "")}");
+        }
+
+        public void SendResponse(string name, byte[] responseContent, int clientSeq = 0)
+        {
+            Packet.Response packet = new()
+            {
+                Id = clientSeq,
+                Name = name,
+                Content = responseContent
+            };
+            ProbeBigWorldPacket("response", packet.Name, packet.Content, packet.Id, 0);
+            Send(new Packet()
+            {
+                No = 0,
+                Type = Packet.ContentType.Response,
+                Content = MessagePackSerializer.Serialize(packet)
+            });
+            if (Common.Common.config.VerboseLevel > VerboseLevel.Silent)
+                log.Info($"{name}{(Common.Common.config.VerboseLevel >= VerboseLevel.Debug ? (", " + FormatMessagePackContent(responseContent)) : "")}");
+        }
+
+        private void Send(Packet packet)
+        {
+            lock (outboundLock)
+                writer.Enqueue(packet);
+        }
+
+
+        private static string FormatMessagePackContent(byte[] content)
+        {
+            try
+            {
+                return MessagePackSerializer.ConvertToJson(content);
+            }
+            catch (Exception ex)
+            {
+                return JsonConvert.SerializeObject(new
+                {
+                    error = ex.GetType().Name,
+                    contentBytes = content.Length
+                });
+            }
+        }
+
+        // persistState=false is the unresolved-write boundary: the in-memory player may disagree with the
+        // durable document, so the transport is closed without writing it.
+        public void DisconnectProtocol(bool persistState = true)
+        {
+            lock (Handlers.GuildModule.MembershipLock)
+            {
+                Player? currentPlayer = player;
+                if (currentPlayer is null)
+                {
+                    DisconnectCore(persistState);
+                    return;
+                }
+
+                lock (GetPlayerOperationLock(currentPlayer.PlayerData.Id))
+                    DisconnectCore(persistState);
+            }
+        }
+
+        private void DisconnectCore(bool persistState = true)
+        {
+            if (!Server.Instance.Sessions.TryGetValue(id, out Session? registered)
+                || !ReferenceEquals(registered, this)
+                || Interlocked.Exchange(ref disconnectState, 1) != 0)
+            {
+                return;
+            }
+
+            using IDisposable metrics = MongoCommandMetrics.Begin("Disconnect");
+            try
+            {
+                if (player is not null)
+                    GuildDormRoomService.Revoke(player.PlayerData.Id);
+                if (persistState)
+                    Save();
+            }
+            catch (Exception exception)
+            {
+                log.Error("Failed to save session state during disconnect.", exception);
+            }
+            finally
+            {
+                log.Warn($"{id} disconnected");
+                _ = writer.CompleteAsync();
+                Server.Instance.Sessions.TryRemove(id, out _);
+            }
+        }
+
+        public void Save()
+        {
+            player?.Save();
+            character?.Save();
+            stage?.Save();
+            inventory?.Save();
+            
+            log.Info($"Saving session state...");
+        }
+    }
+}

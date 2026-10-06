@@ -1,0 +1,3 @@
+Id	Type	IsFree	ConsumeItemId	ConsumeItemCount	BpRewardConfig[1]	BpRewardConfig[2]
+1001	1	1			1001	1070
+1002	2		5	68	1071	1140

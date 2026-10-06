@@ -1,0 +1,102 @@
+﻿using System.Collections.Concurrent;
+using System.Net.Sockets;
+using System.Net;
+using AscNet.Logging;
+using AscNet.Common.Util;
+using AscNet.Table.V2.share.task;
+
+namespace AscNet.GameServer
+{
+    public class Server
+    {
+        public static Logger log;
+        public readonly ConcurrentDictionary<string, Session> Sessions = new();
+        private static Server? _instance;
+        private readonly TcpListener listener;
+        private volatile bool isListening;
+        private volatile bool isStopping;
+
+        public static Server Instance
+        {
+            get
+            {
+                return _instance ??= new Server();
+            }
+        }
+
+        public bool IsListening => isListening;
+
+        static Server()
+        {
+            // TODO: add loglevel based on appsettings
+            LogLevel logLevel = LogLevel.DEBUG;
+            LogLevel fileLogLevel = LogLevel.DEBUG;
+            log = new(typeof(Server), logLevel, fileLogLevel);
+            AppDomain.CurrentDomain.ProcessExit += (_, _) => _instance?.Stop();
+        }
+
+        public Server()
+        {
+            string bindAddress = Environment.GetEnvironmentVariable("ASCNET_GAME_BIND_ADDRESS") ?? "0.0.0.0";
+            listener = new(IPAddress.Parse(bindAddress), Common.Common.config.GameServer.Port);
+        }
+
+        public void Start()
+        {
+            isStopping = false;
+            while (!isStopping)
+            {
+                try
+                {
+                    TableReaderV2.Parse<CurrentTaskTable>();
+                    TableReaderV2.Parse<StoryTaskTable>();
+                    TableReaderV2.Parse<StoryTaskConditionTable>();
+                    TableReaderV2.Parse<CurrentConditionTable>();
+                    TableReaderV2.Parse<ConditionTable>();
+                    TableReaderV2.Parse<TaskTable>();
+                    listener.Start();
+                    GuildDormRoomService.Start();
+                    isListening = true;
+                    log.Info($"{nameof(GameServer)} started and listening on port {Common.Common.config.GameServer.Port}");
+
+                    while (!isStopping)
+                    {
+                        TcpClient tcpClient = listener.AcceptTcpClient();
+                        string id = tcpClient.Client.RemoteEndPoint!.ToString()!;
+
+                        log.Warn($"{id} connected");
+                        Session session = new(id, tcpClient);
+                        if (Sessions.TryAdd(id, session))
+                            session.Start();
+                        else
+                            tcpClient.Close();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    isListening = false;
+                    GuildDormRoomService.Stop();
+                    listener.Stop();
+                    if (isStopping) break;
+                    log.Error("TCP listener error: " + ex.Message);
+                    log.Info("Waiting 3 seconds before restarting...");
+                    Thread.Sleep(3000);
+                }
+            }
+        }
+
+        public void Stop()
+        {
+            isStopping = true;
+            isListening = false;
+            GuildDormRoomService.Stop();
+            listener.Stop();
+            foreach (Session session in Sessions.Values) session.client.Close();
+        }
+
+        public Session? SessionFromUID(long uid)
+        {
+            return Sessions.Select(x => x.Value).FirstOrDefault(x => x.player?.PlayerData.Id == uid);
+        }
+    }
+}

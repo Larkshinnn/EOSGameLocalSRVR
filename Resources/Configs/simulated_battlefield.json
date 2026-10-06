@@ -1,0 +1,34 @@
+{
+  "CycleSeconds": 604800,
+  "ArenaActivity": {
+    "BaseActivityNo": 450,
+    "ActivityStep": 2,
+    "InitialArenaLevelName": "Elite",
+    "HeroArenaLevel": 6,
+    "MaxContributeScore": 100,
+    "MaxProtectedScore": 2,
+    "Status": 2,
+    "BaseTeamTime": 1783918800,
+    "FightDurationSeconds": 565200,
+    "ArenaIndex": 1
+  },
+  "RepeatChallengeEncounter": {
+    "NpcGroups": [
+      [
+        { "NpcId": 91600, "BufferIds": [301104] },
+        { "NpcId": 91600, "BufferIds": [301104] },
+        { "NpcId": 91610, "BufferIds": [301104] },
+        { "NpcId": 91610, "BufferIds": [] }
+      ],
+      [
+        { "NpcId": 91620, "BufferIds": [301104] },
+        { "NpcId": 91610, "BufferIds": [301104] },
+        { "NpcId": 91620, "BufferIds": [301104] },
+        { "NpcId": 93692, "BufferIds": [] }
+      ]
+    ],
+    "SettlementGoods": [
+      { "RewardType": 1, "TemplateId": 62738, "Count": 85 }
+    ]
+  }
+}
