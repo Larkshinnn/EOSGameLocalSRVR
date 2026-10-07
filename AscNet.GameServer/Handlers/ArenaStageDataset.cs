@@ -9,6 +9,7 @@ namespace AscNet.GameServer.Handlers;
 internal static class ArenaStageDataset
 {
     private const string ConfigPath = "./Configs/arena_stage_data.json";
+    private const int BaselineFluctuationLevel = 385;
     private static readonly Lazy<Dataset> Data = new(Load);
     private static readonly Lazy<HashSet<(int AreaId, uint StageId, int MarkId, string Archetype)>> ConfiguredStages = new(() =>
         TableReaderV2.Parse<AreaStageTable>()
@@ -32,7 +33,7 @@ internal static class ArenaStageDataset
         Resolve(areaId, stageId, markId, archetype)?.PassTimeLimit;
 
     public static bool TryHydrate(int areaId, uint stageId, int markId, string archetype, PreFightResponse.PreFightResponseFightData fightData)
-        => TryHydrate(areaId, stageId, markId, archetype, 0, 0, fightData);
+        => TryHydrate(areaId, stageId, markId, archetype, 0, 0, BaselineFluctuationLevel, fightData);
 
     public static bool TryHydrate(
         int areaId,
@@ -41,6 +42,7 @@ internal static class ArenaStageDataset
         string archetype,
         int activityNo,
         long playerId,
+        int fluctuationLevel,
         PreFightResponse.PreFightResponseFightData fightData)
     {
         Stage? stage = Resolve(areaId, stageId, markId, archetype);
@@ -55,7 +57,7 @@ internal static class ArenaStageDataset
             : GenerateWaves(generator, activityNo, playerId, areaId, stageId, ResolveNpcIds(generator));
         fightData.NpcGroupList = waves.Select(npcRefs => new Dictionary<string, object>
         {
-            ["NpcList"] = npcRefs.Select(CloneObject).ToList()
+            ["NpcList"] = npcRefs.Select(npc => CloneNpcForFluctuation(npc, fluctuationLevel)).ToList()
         }).ToList();
         fightData.PassTimeLimit = stage.PassTimeLimit;
         fightData.ReviseId = stage.ReviseId;
@@ -67,25 +69,78 @@ internal static class ArenaStageDataset
         return true;
     }
 
+    private static object? CloneNpcForFluctuation(JObject source, int fluctuationLevel)
+    {
+        Dictionary<string, object?> npc = source.Properties()
+            .ToDictionary(property => property.Name, property => CloneObject(property.Value));
+        int baseLevel = source.Value<int?>("Level") ?? 0;
+        if (baseLevel > 0)
+            npc["Level"] = checked((int)Math.Clamp((long)Math.Round(baseLevel * Math.Max(0, fluctuationLevel) / (double)BaselineFluctuationLevel,
+                MidpointRounding.AwayFromZero), 1, int.MaxValue));
+        return npc;
+    }
+
     private static List<List<JObject>> GenerateWaves(
         Generator generator, int activityNo, long playerId, int areaId, uint stageId,
         (List<JObject> Repeatable, List<JObject> UniqueOnce) npcTemplates)
     {
-        List<JObject> waveNpcs = npcTemplates.UniqueOnce.ToList();
+        List<JObject> bossTemplates = generator.BossNpcIds
+            .Select(id => npcTemplates.UniqueOnce.Single(npc => npc.Value<int>("NpcId") == id)).ToList();
+        List<JObject> waveNpcs = npcTemplates.UniqueOnce
+            .Where(npc => !generator.BossNpcIds.Contains(npc.Value<int>("NpcId"))).ToList();
         if (generator.IncludeEveryNpcOnce)
             waveNpcs.AddRange(npcTemplates.Repeatable);
 
         uint state = Seed(activityNo, playerId, areaId, stageId);
-        while (waveNpcs.Count < generator.WaveCount)
+        while (waveNpcs.Count + bossTemplates.Count < generator.WaveCount)
             waveNpcs.Add(npcTemplates.Repeatable[(int)(Next(ref state) % (uint)npcTemplates.Repeatable.Count)]);
 
-        for (int index = waveNpcs.Count - 1; index > 0; index--)
+        Shuffle(waveNpcs, ref state);
+        Shuffle(bossTemplates, ref state);
+        JObject?[] generatedWaves = new JObject?[generator.WaveCount];
+        List<int> bossPositions = PlaceBosses(generator.WaveCount, bossTemplates.Count, generator.MinimumBossWaveGap, ref state);
+        for (int index = 0; index < bossTemplates.Count; index++)
+            generatedWaves[bossPositions[index]] = bossTemplates[index];
+
+        int normalIndex = 0;
+        for (int index = 0; index < generatedWaves.Length; index++)
         {
-            int other = (int)(Next(ref state) % (uint)(index + 1));
-            (waveNpcs[index], waveNpcs[other]) = (waveNpcs[other], waveNpcs[index]);
+            if (generatedWaves[index] is null)
+                generatedWaves[index] = waveNpcs[normalIndex++];
         }
 
-        return waveNpcs.Select(npc => new List<JObject> { npc }).ToList();
+        return generatedWaves.Select(npc => new List<JObject> { npc! }).ToList();
+    }
+
+    private static void Shuffle<T>(List<T> values, ref uint state)
+    {
+        for (int index = values.Count - 1; index > 0; index--)
+        {
+            int other = (int)(Next(ref state) % (uint)(index + 1));
+            (values[index], values[other]) = (values[other], values[index]);
+        }
+    }
+
+    private static List<int> PlaceBosses(int waveCount, int bossCount, int minimumGap, ref uint state)
+    {
+        if (bossCount == 0) return [];
+        if (waveCount < (bossCount - 1) * minimumGap + 1)
+            throw new InvalidDataException("Could not place Warzone boss appearances with the configured wave gap");
+
+        int[] slack = new int[bossCount + 1];
+        int remaining = waveCount - ((bossCount - 1) * minimumGap + 1);
+        for (int index = 0; index < remaining; index++)
+            slack[(int)(Next(ref state) % (uint)slack.Length)]++;
+
+        List<int> selected = [];
+        int wave = slack[0];
+        for (int index = 0; index < bossCount; index++)
+        {
+            selected.Add(wave);
+            wave += minimumGap + slack[index + 1];
+        }
+        Shuffle(selected, ref state);
+        return selected;
     }
 
     private static (List<JObject> Repeatable, List<JObject> UniqueOnce) ResolveNpcIds(Generator generator)
@@ -163,7 +218,9 @@ internal static class ArenaStageDataset
             if (generator.Mode != "SingleEnemyPerWave" || generator.WaveCount <= 0
                 || generator.RepeatableNpcIds.Count == 0
                 || generator.IncludeEveryNpcOnce && generator.WaveCount < generator.RepeatableNpcIds.Count + generator.UniqueOnceNpcIds.Count
-                || generator.WaveCount < generator.UniqueOnceNpcIds.Count
+                || generator.WaveCount < generator.BossNpcIds.Count
+                || generator.MinimumBossWaveGap < 1
+                || generator.BossNpcIds.Except(generator.UniqueOnceNpcIds).Any()
                 || generator.RepeatableNpcIds.Intersect(generator.UniqueOnceNpcIds).Any()
                 || configuredIds.Distinct().Count() != configuredIds.Length
                 || matchingNpcDefinitions != configuredIds.Length
@@ -195,6 +252,8 @@ internal static class ArenaStageDataset
         public List<JObject> NpcDefinitions { get; set; } = new();
         public List<int> RepeatableNpcIds { get; set; } = new();
         public List<int> UniqueOnceNpcIds { get; set; } = new();
+        public List<int> BossNpcIds { get; set; } = new();
+        public int MinimumBossWaveGap { get; set; } = 3;
     }
 
     private sealed class Stage

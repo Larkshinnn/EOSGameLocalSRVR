@@ -1,0 +1,524 @@
+{
+  "source": "Huaxu API",
+  "syncedAt": "2026-10-06T11:14:40.469385+00:00",
+  "server": "ap",
+  "warzone": {
+    "activity": {
+      "server": "ap",
+      "activity": 462,
+      "challenge": 16,
+      "start": "2026-10-05T07:00:00Z",
+      "end": "2026-10-11T18:00:00Z",
+      "members": 375,
+      "updatedAt": "2026-10-06T11:01:00.007068Z",
+      "area": {
+        "weather": {
+          "name": "Rending Edge",
+          "description": "The character deals 80% more CRIT DMG for 15s after being switched in. Duration resets every time it is triggered.",
+          "icon": "image/iconaffix/iconaffixwuliup",
+          "background": "image/uiarena/uiarenabufficon24"
+        },
+        "zones": [
+          {
+            "id": 11,
+            "name": "Machine Factory",
+            "description": "Duo Challenge: Refresh 2 Elite enemies per wave",
+            "buffDescription": "Physical DMG greatly increases, Ultima Slash DMG slightly increases.",
+            "element": "physical",
+            "icon": "image/uiarena/uiarenagqxqtab001",
+            "buffs": [
+              {
+                "id": 4001,
+                "name": "Machine Factory",
+                "description": "Physical DMG greatly increases, Ultima Slash DMG slightly increases."
+              }
+            ],
+            "weathers": [
+              {
+                "name": "Rending Edge",
+                "description": "The character deals 80% more CRIT DMG for 15s after being switched in. Duration resets every time it is triggered.",
+                "icon": "image/iconaffix/iconaffixwuliup",
+                "background": "image/uiarena/uiarenabufficon24"
+              }
+            ]
+          },
+          {
+            "id": 23,
+            "name": "Cycle of Fire",
+            "description": "Crowd Battle: Refresh 3 or 6 Normal enemies per wave",
+            "buffDescription": "Fire DMG greatly increases, Ignition DMG slightly increases.",
+            "element": "physical",
+            "icon": "image/uiarena/uiarenagqxqtab001",
+            "buffs": [
+              {
+                "id": 4003,
+                "name": "Cycle of Fire",
+                "description": "Fire DMG greatly increases, Ignition DMG slightly increases."
+              }
+            ],
+            "weathers": [
+              {
+                "name": "Scorching Valor",
+                "description": "The character deals 10% more Fire DMG for each Signal Orb pinged, stacking up to 6 times and lasting for 8s. Duration resets every time the effect is triggered.",
+                "icon": "image/iconaffix/iconaffixhuoyanup",
+                "background": "image/uiarena/uiarenabufficon12"
+              }
+            ]
+          },
+          {
+            "id": 131,
+            "name": "Entropic Distortion",
+            "description": "Desperate Fight: Refresh only 1 enemy per wave",
+            "buffDescription": "Every 3 waves, enemies gain Equilibrium Field.",
+            "element": "physical",
+            "icon": "image/uiarena/uiarenagqxqtab001",
+            "buffs": [
+              {
+                "id": 4088,
+                "name": "Diffraction Void",
+                "description": "Every 3 waves, enemies gain Equilibrium Field."
+              },
+              {
+                "id": 4115,
+                "name": "Shattered Peak",
+                "description": "Physical DMG slightly increases, Ultima Slash DMG greatly increases."
+              }
+            ],
+            "weathers": [
+              {
+                "name": "Primary Stack",
+                "description": "Nihil DMG increases by 60% for 8s after the character casting Signature. Duration resets every time the effect is triggered.",
+                "icon": "image/iconaffix/iconaffixnihilityup",
+                "background": "image/uiarena/uiarenabufficon24"
+              },
+              {
+                "name": "Blade Will",
+                "description": "The character deals 5% more Physical DMG for each Signal Orb pinged, stacking up to 8 times and lasting for 8s. Duration resets every time the effect is triggered. The character Ultima deals 40% more damage through Ultima Slash.",
+                "icon": "image/iconaffix/iconaffixzhanjiup",
+                "background": "image/uiarena/uiarenabufficon25"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "activities": {
+      "min": 246,
+      "max": 462
+    }
+  },
+  "ppc": {
+    "activity": {
+      "server": "ap",
+      "activity": 274,
+      "start": "2026-10-05T05:00:00Z",
+      "end": "2026-10-12T05:00:00Z",
+      "members": 11976,
+      "updatedAt": "2026-10-06T11:05:00.001726Z",
+      "level": {
+        "id": 4,
+        "name": "Ultimate",
+        "icon": "image/icontype/iconrank4",
+        "levelMin": 80,
+        "levelMax": 120
+      },
+      "bosses": [
+        {
+          "id": 2038,
+          "name": "Ephialtes",
+          "description": "Tired of living as a \"hero\" in a repeating lie, he plunges into an abyss of no return and becomes \"Ephialtes\".",
+          "icon": "image/uifubenbosssingle/bosssingletab50",
+          "stages": [
+            {
+              "id": 30303261,
+              "difficulty": "Knight",
+              "score": 84000,
+              "buffs": [
+                {
+                  "name": "Corrosion",
+                  "description": "The internal structure has been corroded by excessively stored radiant energy. Dark DMG received is increased significantly.",
+                  "icon": "image/uifubenbosssingle/bosssingleiconpoweran"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Eclipse Reaper",
+                  "description": "Ephialtes drags his heavy scythe and leaps up to launch a violent strike."
+                },
+                {
+                  "name": "Shadow Bonecrusher",
+                  "description": "Ephialtes swings the scythe to slash twice, then charges and unleashes a blade wave toward the target."
+                },
+                {
+                  "name": "Night Slash",
+                  "description": "Ephialtes pulls the target in with his scythe, slashes multiple times, then fires a beam to damage the target."
+                },
+                {
+                  "name": "Shivering Edge",
+                  "description": "Ephialtes dodges to hide his traces and dashes toward the target to launch an attack."
+                },
+                {
+                  "name": "Confinement Fissure",
+                  "description": "Ephialtes raises his huge scythe and attacks the target."
+                }
+              ]
+            },
+            {
+              "id": 30303262,
+              "difficulty": "Chaos",
+              "score": 168000,
+              "buffs": [
+                {
+                  "name": "Corrosion",
+                  "description": "The internal structure has been corroded by excessively stored radiant energy. Dark DMG received is increased significantly.",
+                  "icon": "image/uifubenbosssingle/bosssingleiconpoweran"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Eclipse Reaper",
+                  "description": "Ephialtes drags his heavy scythe and leaps up to launch a violent strike."
+                },
+                {
+                  "name": "Shadow Bonecrusher",
+                  "description": "Ephialtes swings the scythe to slash twice, then charges and unleashes a blade wave toward the target."
+                },
+                {
+                  "name": "Night Slash",
+                  "description": "Ephialtes pulls the target in with his scythe, slashes multiple times, then fires a beam to damage the target."
+                },
+                {
+                  "name": "Shivering Edge",
+                  "description": "Ephialtes dodges to hide his traces and dashes toward the target to launch an attack."
+                },
+                {
+                  "name": "Confinement Fissure",
+                  "description": "Ephialtes raises his huge scythe and attacks the target."
+                }
+              ]
+            },
+            {
+              "id": 30303263,
+              "difficulty": "Hell",
+              "score": 336000,
+              "buffs": [
+                {
+                  "name": "Corrosion",
+                  "description": "The internal structure has been corroded by excessively stored radiant energy. Dark DMG received is increased significantly.",
+                  "icon": "image/uifubenbosssingle/bosssingleiconpoweran"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Scorched Earth",
+                  "description": "Reshapes the battlefield, dealing continuous extra DMG to all enemies within it."
+                },
+                {
+                  "name": "Eclipse Reaper",
+                  "description": "Ephialtes drags his heavy scythe and leaps up to launch a violent strike."
+                },
+                {
+                  "name": "Shadow Bonecrusher",
+                  "description": "Ephialtes swings the scythe to slash twice, then charges and unleashes a blade wave toward the target."
+                },
+                {
+                  "name": "Night Slash",
+                  "description": "Ephialtes pulls the target in with his scythe, slashes multiple times, then fires a beam to damage the target."
+                },
+                {
+                  "name": "Shivering Edge",
+                  "description": "Ephialtes dodges to hide his traces and dashes toward the target to launch an attack."
+                },
+                {
+                  "name": "Confinement Fissure",
+                  "description": "Ephialtes raises his huge scythe and attacks the target."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 2035,
+          "name": "Veronica",
+          "description": "Born in the Church of Machina, she possesses overwhelming power that cannot be directly gazed upon. To her, hypocrisy is the red line that calls for punishment.",
+          "icon": "image/uifubenbosssingle/bosssingletab47",
+          "stages": [
+            {
+              "id": 30303252,
+              "difficulty": "Knight",
+              "score": 84000,
+              "buffs": [
+                {
+                  "name": "Plasmatic Corruption",
+                  "description": "Plasma Beam attacks can break through the defenses of Veronica's frame. Based on this, damage taken from Plasma Beam Effect will greatly increase. (Raydiance Effect DMG slightly increased)",
+                  "icon": "image/uifubenbosssingle/bosssingleiconpowerdianshu"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Rapid Thrust",
+                  "description": "Veronica charges toward the enemy to deliver an upward thrust."
+                },
+                {
+                  "name": "Blazing Lance",
+                  "description": "Veronica stabs the enemy three times with her lance."
+                },
+                {
+                  "name": "Shivering Assault",
+                  "description": "Veronica spins and lashes the enemy multiple times with her tail."
+                },
+                {
+                  "name": "Judgement Spikes",
+                  "description": "Veronica summons multiple spikes to attack the enemy."
+                },
+                {
+                  "name": "Touch of Condemnation",
+                  "description": "Veronica leaps into the air, charges up, and hurls her lance. Upon returning, the lance creates a shockwave to strike the enemy."
+                },
+                {
+                  "name": "Decree Strike",
+                  "description": "Veronica charges energy and throws her lance to knock the enemy away."
+                },
+                {
+                  "name": "Shadowbreaker",
+                  "description": "Veronica strikes the enemy with her lance, then leaps above to strike the ground, creating many spikes that explode and deal AoE damage."
+                }
+              ]
+            },
+            {
+              "id": 30303253,
+              "difficulty": "Chaos",
+              "score": 168000,
+              "buffs": [
+                {
+                  "name": "Plasmatic Corruption",
+                  "description": "Plasma Beam attacks can break through the defenses of Veronica's frame. Based on this, damage taken from Plasma Beam Effect will greatly increase. (Raydiance Effect DMG slightly increased)",
+                  "icon": "image/uifubenbosssingle/bosssingleiconpowerdianshu"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Rapid Thrust",
+                  "description": "Veronica charges toward the enemy to deliver an upward thrust."
+                },
+                {
+                  "name": "Blazing Lance",
+                  "description": "Veronica stabs the enemy three times with her lance."
+                },
+                {
+                  "name": "Shivering Assault",
+                  "description": "Veronica spins and lashes the enemy multiple times with her tail."
+                },
+                {
+                  "name": "Judgement Spikes",
+                  "description": "Veronica summons multiple spikes to attack the enemy."
+                },
+                {
+                  "name": "Touch of Condemnation",
+                  "description": "Veronica leaps into the air, charges up, and hurls her lance. Upon returning, the lance creates a shockwave to strike the enemy."
+                },
+                {
+                  "name": "Decree Strike",
+                  "description": "Veronica charges energy and throws her lance to knock the enemy away."
+                },
+                {
+                  "name": "Shadowbreaker",
+                  "description": "Veronica strikes the enemy with her lance, then leaps above to strike the ground, creating many spikes that explode and deal AoE damage."
+                }
+              ]
+            },
+            {
+              "id": 30303254,
+              "difficulty": "Hell",
+              "score": 336000,
+              "buffs": [
+                {
+                  "name": "Plasmatic Corruption",
+                  "description": "Plasma Beam attacks can break through the defenses of Veronica's frame. Based on this, damage taken from Plasma Beam Effect will greatly increase. (Raydiance Effect DMG slightly increased)",
+                  "icon": "image/uifubenbosssingle/bosssingleiconpowerdianshu"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Scorched Earth",
+                  "description": "Reshapes the battlefield, dealing continuous extra DMG to all enemies within it."
+                },
+                {
+                  "name": "Rapid Thrust",
+                  "description": "Veronica charges toward the enemy to deliver an upward thrust."
+                },
+                {
+                  "name": "Blazing Lance",
+                  "description": "Veronica stabs the enemy three times with her lance."
+                },
+                {
+                  "name": "Shivering Assault",
+                  "description": "Veronica spins and lashes the enemy multiple times with her tail."
+                },
+                {
+                  "name": "Judgement Spikes",
+                  "description": "Veronica summons multiple spikes to attack the enemy."
+                },
+                {
+                  "name": "Touch of Condemnation",
+                  "description": "Veronica leaps into the air, charges up, and hurls her lance. Upon returning, the lance creates a shockwave to strike the enemy."
+                },
+                {
+                  "name": "Decree Strike",
+                  "description": "Veronica charges energy and throws her lance to knock the enemy away."
+                },
+                {
+                  "name": "Shadowbreaker",
+                  "description": "Veronica strikes the enemy with her lance, then leaps above to strike the ground, creating many spikes that explode and deal AoE damage."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": 2020,
+          "name": "Trailblazer",
+          "description": "\"Chariot\" of the Church of Machina. With an awe-inspiring and imposing lined design, he possesses unparalleled speed and raw power capable of shattering chaos. He always leads the charge at the forefront, poised to blaze a trail for his comrades.",
+          "icon": "image/uifubenbosssingle/bosssingletab37",
+          "stages": [
+            {
+              "id": 30302903,
+              "difficulty": "Knight",
+              "score": 84000,
+              "buffs": [
+                {
+                  "name": "Steel-willed",
+                  "description": "Fight with all your might and passion is the the greatest respect for your enemy.",
+                  "icon": "image/uifubenbosssingle/bosssingleiconguanghui"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Barrage Slam",
+                  "description": "Trailblazer unleashes a fan-shaped barrage in front of him before leaping into the air and slamming the ground with his right hand to deal AOE DMG."
+                },
+                {
+                  "name": "Rising Dragon",
+                  "description": "Trailblazer charges toward his enemy and fires a close-range blast, using the recoil to leap high into the air before slamming his fist into the ground to deal AoE DMG."
+                },
+                {
+                  "name": "Blazing Shock",
+                  "description": "Trailblazer leaps up with a blast, firing twice in mid-air before a powerful ground slam that creates a massive shockwave."
+                },
+                {
+                  "name": "Overlord Smash",
+                  "description": "After a brief charge, Trailblazer leaps forward and smashes the ground with his right hand."
+                },
+                {
+                  "name": "Blitzstrike",
+                  "description": "Trailblazer swiftly delivers a swift combination of elbow and uppercut strikes to the foe before him."
+                },
+                {
+                  "name": "Shelling March",
+                  "description": "Trailblazer launches a barrage of shelling attacks to suppress his foe in the distance while closing in on them."
+                }
+              ]
+            },
+            {
+              "id": 30302904,
+              "difficulty": "Chaos",
+              "score": 168000,
+              "buffs": [
+                {
+                  "name": "Steel-willed",
+                  "description": "Fight with all your might and passion is the the greatest respect for your enemy.",
+                  "icon": "image/uifubenbosssingle/bosssingleiconguanghui"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Barrage Slam",
+                  "description": "Trailblazer unleashes a fan-shaped barrage in front of him before leaping into the air and slamming the ground with his right hand to deal AOE DMG."
+                },
+                {
+                  "name": "Rising Dragon",
+                  "description": "Trailblazer charges toward his enemy and fires a close-range blast, using the recoil to leap high into the air before slamming his fist into the ground to deal AoE DMG."
+                },
+                {
+                  "name": "Blazing Shock",
+                  "description": "Trailblazer leaps up with a blast, firing twice in mid-air before a powerful ground slam that creates a massive shockwave."
+                },
+                {
+                  "name": "Overlord Smash",
+                  "description": "After a brief charge, Trailblazer leaps forward and smashes the ground with his right hand."
+                },
+                {
+                  "name": "Blitzstrike",
+                  "description": "Trailblazer swiftly delivers a swift combination of elbow and uppercut strikes to the foe before him."
+                },
+                {
+                  "name": "Shelling March",
+                  "description": "Trailblazer launches a barrage of shelling attacks to suppress his foe in the distance while closing in on them."
+                }
+              ]
+            },
+            {
+              "id": 30302905,
+              "difficulty": "Hell",
+              "score": 336000,
+              "buffs": [
+                {
+                  "name": "Steel-willed",
+                  "description": "Fight with all your might and passion is the the greatest respect for your enemy.",
+                  "icon": "image/uifubenbosssingle/bosssingleiconguanghui"
+                }
+              ],
+              "features": [],
+              "skills": [
+                {
+                  "name": "Scorched Earth",
+                  "description": "Reshapes the battlefield, dealing continuous extra DMG to all enemies within it."
+                },
+                {
+                  "name": "Barrage Slam",
+                  "description": "Trailblazer unleashes a fan-shaped barrage in front of him before leaping into the air and slamming the ground with his right hand to deal AOE DMG."
+                },
+                {
+                  "name": "Rising Dragon",
+                  "description": "Trailblazer charges toward his enemy and fires a close-range blast, using the recoil to leap high into the air before slamming his fist into the ground to deal AoE DMG."
+                },
+                {
+                  "name": "Blazing Shock",
+                  "description": "Trailblazer leaps up with a blast, firing twice in mid-air before a powerful ground slam that creates a massive shockwave."
+                },
+                {
+                  "name": "Overlord Smash",
+                  "description": "After a brief charge, Trailblazer leaps forward and smashes the ground with his right hand."
+                },
+                {
+                  "name": "Blitzstrike",
+                  "description": "Trailblazer swiftly delivers a swift combination of elbow and uppercut strikes to the foe before him."
+                },
+                {
+                  "name": "Shelling March",
+                  "description": "Trailblazer launches a barrage of shelling attacks to suppress his foe in the distance while closing in on them."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "activities": {
+      "min": 143,
+      "max": 274
+    }
+  },
+  "localTableUpdates": {
+    "ppcStageRows": 0,
+    "warzoneAreaFields": 0
+  }
+}

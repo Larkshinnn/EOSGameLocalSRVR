@@ -10,6 +10,7 @@ using AscNet.Table.V2.share.fuben.bossactivity;
 using AscNet.Table.V2.share.reward;
 using MessagePack;
 using MongoDB.Driver;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace AscNet.GameServer.Handlers
@@ -583,7 +584,21 @@ namespace AscNet.GameServer.Handlers
             int stageType = request.BossSingleStageType == 0 ? 1 : request.BossSingleStageType;
             if (!TryResolveFightStage(session.player.SimulatedBattlefield, stageId, stageType, out int sectionId, out BossSingleStageTable? stage)
                 || stage is null)
+            {
+                SimulatedBattlefieldState state = session.player.SimulatedBattlefield;
+                BossSingleGradeTable? grade = state.BossLevelType > 0 ? Grades.Value.FirstOrDefault(row => row.LevelType == state.BossLevelType) : null;
+                BossSingleChallengeGradeTable? requirement = grade is null ? null : ChallengeGrades.Value
+                    .Where(row => grade.GradeType >= row.NeedGradeType)
+                    .OrderByDescending(row => row.LevelType)
+                    .FirstOrDefault();
+                session.log.Warn(
+                    $"PPC pre-fight rejected uid={session.player.PlayerData.Id} stage={stageId} stageType={stageType} " +
+                    $"activity={state.BossActivityNo} levelType={state.BossLevelType} gradeType={grade?.GradeType ?? 0} " +
+                    $"totalScore={state.BossTotalScore} challengeScoreRequired={requirement?.NeedScore ?? 0} " +
+                    $"selectedChallengeSection={state.BossChallengeSelectedSection} selectedFeatureGroup={state.BossChallengeSelectedFeatureGroup} " +
+                    $"stageInTable={Stages.Value.ContainsKey(stageId)}");
                 return false;
+            }
 
             List<int> characters = request.CardIds?
                 .Where(id => id > 0)
@@ -611,7 +626,15 @@ namespace AscNet.GameServer.Handlers
                 Dictionary<int, int> ignoredBuffChoices;
                 if (!TryGetChallengeBuffGroup(request.BossSingleChallengeBuffGroup,
                     session.player.SimulatedBattlefield, out ignoredBuffGroup, out ignoredFeatureIds, out ignoredBuffChoices))
+                {
+                    session.log.Warn(
+                        $"PPC intensive pre-fight rejected uid={session.player.PlayerData.Id} stage={stageId} " +
+                        $"activity={session.player.SimulatedBattlefield.BossActivityNo} levelType={session.player.SimulatedBattlefield.BossLevelType} " +
+                        $"selectedSection={session.player.SimulatedBattlefield.BossChallengeSelectedSection} " +
+                        $"featureGroup={session.player.SimulatedBattlefield.BossChallengeSelectedFeatureGroup} " +
+                        $"buffPayload={JsonConvert.SerializeObject(request.BossSingleChallengeBuffGroup)}");
                     return false;
+                }
             }
             ApplyChallengeFeatureEvents(request, response.FightData, session.player.SimulatedBattlefield);
 
@@ -878,6 +901,38 @@ namespace AscNet.GameServer.Handlers
             session.player.Save();
             session.SendPush(BuildLoginData(session.player));
             throw new CommandMessageCallbackException($"PPC attempts set to {attempts}/{grade.WeekChallengeCount} (weekly maximum).");
+        }
+
+        internal static void ResetCodexScoresFromCommand(Session session)
+        {
+            long now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            ReconcileLive(session, now, includeOwnershipSnapshot: false);
+            SimulatedBattlefieldState state = session.player.SimulatedBattlefield;
+            int[] stageIds = state.BossTrialScores.Keys.Concat(state.BossBestiaryScores.Keys).Distinct().ToArray();
+            state.BossTrialScores.Clear();
+            state.BossBestiaryScores.Clear();
+
+            List<StageDatum> changedStages = [];
+            foreach (int stageId in stageIds)
+            {
+                if (!session.stage.Stages.TryGetValue((uint)stageId, out StageDatum? datum))
+                    continue;
+                long expectedScore = ExpectedCycleStageScore(state, stageId);
+                if (datum.Score == expectedScore)
+                    continue;
+                datum.Score = expectedScore;
+                changedStages.Add(datum);
+            }
+
+            session.player.Save();
+            if (changedStages.Count > 0)
+            {
+                session.stage.Save();
+                session.SendPush(new NotifyStageData { StageList = changedStages });
+            }
+            session.SendPush(BuildLoginData(session.player, now));
+            throw new CommandMessageCallbackException(
+                $"PPC Codex boss scores reset: {stageIds.Length} stage record(s) cleared from Current Threats and Ultimate Zone.");
         }
         private static (int LevelType, int SectionId, int FeatureGroupId)? ResolveChallengeData(
             SimulatedBattlefieldState state,
@@ -1313,11 +1368,11 @@ namespace AscNet.GameServer.Handlers
             stage.Score = Math.Max(stage.Score, bestScore);
             stage.PassTimesTotal = Math.Max(1, stage.PassTimesTotal);
             stage.LastPassTime = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            stage.LastRecordTime = pending.Result.FightTime;
+            stage.LastRecordTime = pending.Result.TimeLeft;
             stage.LastCardIds = pending.Characters.Select(id => (long)id).ToList();
             if (newBest)
             {
-                stage.BestRecordTime = pending.Result.FightTime;
+                stage.BestRecordTime = pending.Result.TimeLeft;
                 stage.BestCardIds = pending.Characters.Select(id => (long)id).ToList();
             }
             if (!exists)
@@ -1387,7 +1442,7 @@ namespace AscNet.GameServer.Handlers
                 checked(bossScore + timeScore + hpScore));
             return new BossSingleFightResult
             {
-                FightTime = fightTime,
+                FightTime = killTime,
                 BossDamagePer = bossDamagePer,
                 BossDamageScore = bossScore,
                 MaxBossDamageScore = stage.BossLoseHpScore,

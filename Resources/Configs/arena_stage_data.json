@@ -313,7 +313,9 @@
           { "NpcId": 81800, "BufferIds": [], "Level": 1805, "MagicInfos": [{ "MagicId": 763659, "Level": 1 }, { "MagicId": 780253, "Level": 1 }], "AttrTable": {} }
         ],
         "RepeatableNpcIds": [90990, 90950, 90910, 90780],
-        "UniqueOnceNpcIds": [81300, 81600, 81800]
+        "UniqueOnceNpcIds": [81300, 81600, 81800],
+        "BossNpcIds": [81300, 81600, 81800],
+        "MinimumBossWaveGap": 3
       },
       "PassTimeLimit": 300,
       "ReviseId": 209,
@@ -347,7 +349,7 @@
         "WaveCostTimes": "[]",
         "TimePointScore": "[]"
       },
-      "PolicyNote": "AscNet test generator profile. NPC templates use representative existing table variants, not verified Warzone zone-131 levels/buffs. WaveCount is a local test default."
+      "PolicyNote": "AscNet test generator profile. NPC templates use representative existing table variants, not verified Warzone zone-131 levels/buffs. WaveCount is a local test default. Repeat BossNpcIds entries to schedule the same NPC in multiple waves."
     }
   ]
 }

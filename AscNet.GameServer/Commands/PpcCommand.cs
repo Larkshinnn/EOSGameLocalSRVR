@@ -7,9 +7,9 @@ namespace AscNet.GameServer.Commands
     {
         public PpcCommand(Session session, string[] args, bool validate = true) : base(session, args, validate) { }
 
-        public override string Help => "Use /ppc tiers, /ppc tier <LevelType>, /ppc reset, /ppc attempts reset, or /ppc attempts <count>.";
+        public override string Help => "Use /ppc tiers, /ppc tier <LevelType>, /ppc reset, /ppc codex reset, /ppc attempts reset, or /ppc attempts <count>.";
 
-        [Argument(0, @"^(tiers|tier|reset|attempts)$", "PPC command", ArgumentFlags.IgnoreCase)]
+        [Argument(0, @"^(tiers|tier|reset|codex|attempts)$", "PPC command", ArgumentFlags.IgnoreCase)]
         string Action { get; set; } = string.Empty;
 
         [Argument(1, @"^(reset|[0-9]+)$", "LevelType or PPC attempt count", ArgumentFlags.Optional | ArgumentFlags.IgnoreCase)]
@@ -32,6 +32,14 @@ namespace AscNet.GameServer.Commands
                 if (!string.IsNullOrEmpty(Value))
                     throw new CommandMessageCallbackException("Usage: /ppc reset");
                 BossModule.SetChallengeAttemptsFromCommand(session, 0);
+                return;
+            }
+
+            if (Action.Equals("codex", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!Value.Equals("reset", StringComparison.OrdinalIgnoreCase))
+                    throw new CommandMessageCallbackException("Usage: /ppc codex reset");
+                BossModule.ResetCodexScoresFromCommand(session);
                 return;
             }
 

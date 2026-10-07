@@ -831,7 +831,8 @@ namespace AscNet.Common.Database
             CharacterSkillTable characterSkill,
             IReadOnlyDictionary<int, IReadOnlyList<uint>> skillIdsByGroupId,
             CharacterSkillTableIndexes tableIndexes,
-            IReadOnlyCollection<int> gatherRewards)
+            IReadOnlyCollection<int> gatherRewards,
+            bool synchronizeToRank = false)
         {
             bool changed = false;
             Dictionary<int, IReadOnlyList<CharacterSkillUpgradeTable>> upgradesBySkillId = tableIndexes.UpgradesBySkillId;
@@ -865,17 +866,22 @@ namespace AscNet.Common.Database
                         changed = true;
                     }
                 }
-                else if (targetLevel > current.Level)
+                else if (targetLevel != current.Level && (synchronizeToRank || targetLevel > current.Level))
                 {
-                    int currentIndex = skills.IndexOf(current);
-                    skills[currentIndex] = new CharacterSkill { Id = current.Id, Level = targetLevel };
-                    changed = true;
+                    if (targetLevel <= 0)
+                        changed |= skills.Remove(current);
+                    else
+                    {
+                        int currentIndex = skills.IndexOf(current);
+                        skills[currentIndex] = new CharacterSkill { Id = current.Id, Level = targetLevel };
+                        changed = true;
+                    }
                 }
             }
             return changed;
         }
 
-        public bool UnlockQualityGatedSkills(CharacterData character, IReadOnlyCollection<int> gatherRewards)
+        public bool UnlockQualityGatedSkills(CharacterData character, IReadOnlyCollection<int> gatherRewards, bool synchronizeToRank = false)
         {
             CharacterSkillTable? skillTable = TableReaderV2.Parse<CharacterSkillTable>()
                 .Find(row => row.CharacterId == character.Id);
@@ -883,7 +889,7 @@ namespace AscNet.Common.Database
                 return false;
             Dictionary<int, IReadOnlyList<uint>> skillsByGroup = BuildCharacterSkillIdsByGroupId(
                 TableReaderV2.Parse<CharacterSkillGroupTable>());
-            return ReconcileQualityGatedSkills(character, character.SkillList, skillTable, skillsByGroup, new(), gatherRewards);
+            return ReconcileQualityGatedSkills(character, character.SkillList, skillTable, skillsByGroup, new(), gatherRewards, synchronizeToRank);
         }
 
 

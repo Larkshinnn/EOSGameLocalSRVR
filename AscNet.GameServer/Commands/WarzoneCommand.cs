@@ -65,7 +65,7 @@ namespace AscNet.GameServer.Commands
                 if (!int.TryParse(Value, out int fluctuationLevel))
                     throw new CommandMessageCallbackException("Usage: /warzone fluctuation <level> (0 or higher).");
                 ArenaModule.SetFluctuationFromCommand(session, fluctuationLevel);
-                return;
+                throw new CommandMessageCallbackException($"Warzone fluctuation set to {fluctuationLevel}.");
             }
 
             if (Operation.Equals("tier", StringComparison.OrdinalIgnoreCase))

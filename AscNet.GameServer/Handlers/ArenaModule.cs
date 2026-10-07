@@ -6,6 +6,7 @@ using AscNet.Table.V2.client.fuben.arena;
 using AscNet.Table.V2.share.fuben;
 using AscNet.Table.V2.share.fuben.arena;
 using MessagePack;
+using MongoDB.Driver;
 using Newtonsoft.Json.Linq;
 
 namespace AscNet.GameServer.Handlers
@@ -131,6 +132,8 @@ namespace AscNet.GameServer.Handlers
             state.ArenaJoined = true;
             state.ArenaJoinActivity = state.ArenaActivityNo;
             session.player.Save();
+            session.SendPush(BuildActivity(session.player, null));
+            session.log.Info($"Warzone room joined uid={session.player.PlayerData.Id} activity={state.ArenaActivityNo} fluctuation={state.ArenaFluctuationLevel}");
             session.SendResponse(new JoinActivityResponse { Code = 0, ChallengeId = state.ArenaChallengeId }, packet.Id);
         }
 
@@ -262,6 +265,10 @@ namespace AscNet.GameServer.Handlers
             int timePoint = Evaluate(mark.TimePoint, metrics, mark.MaxTimePoint);
             int npcPoint = Evaluate(mark.NpcGroupPoint, metrics, mark.MaxNpcGroupPoint);
             int point = Math.Clamp(enemyPoint + myHpPoint + timePoint + npcPoint, mark.MinPoint, mark.MaxPoint);
+            session.log.Info(
+                $"Warzone settle uid={session.player.PlayerData.Id} activity={state.ArenaActivityNo} fluctuation={state.ArenaFluctuationLevel} " +
+                $"area={areaId} stage={result.StageId} mark={areaStage.MarkId} damage={metrics["EnemyHp"]:0} kills={metrics["KillNum"]:0}/{metrics["TotalNum"]:0} " +
+                $"enemyPoint={enemyPoint} hpPoint={myHpPoint} timePoint={timePoint} npcPoint={npcPoint} total={point}");
             int oldStage = state.ArenaStageMaxPoints.GetValueOrDefault(result.StageId);
             int oldArea = state.ArenaAreaMaxPoints.GetValueOrDefault(areaId);
             if (point > oldStage)
@@ -430,7 +437,7 @@ namespace AscNet.GameServer.Handlers
             response.FightData.FightEventsWithLevel = new List<dynamic>();
             if (!ArenaStageDataset.TryHydrate(
                     request.SelectAreaId, request.StageId, area.MarkId, area.Desc,
-                    state.ArenaActivityNo, session.player.PlayerData.Id, response.FightData))
+                    state.ArenaActivityNo, session.player.PlayerData.Id, state.ArenaFluctuationLevel, response.FightData))
                 return false;
             int distributionType = area.DistributeTypes.FirstOrDefault();
             int distributionMaximum = state.ArenaDistributeMaxPoints.GetValueOrDefault(distributionType);
@@ -439,6 +446,10 @@ namespace AscNet.GameServer.Handlers
             stageParams["DistributeMaxScore"] = distributionMaximum.ToString();
             stageParams["MarkId"] = area.MarkId.ToString();
             response.FightData.StageParams = stageParams;
+            int waveCount = response.FightData.NpcGroupList?.Count ?? 0;
+            session.log.Info(
+                $"Warzone pre-fight uid={session.player.PlayerData.Id} activity={state.ArenaActivityNo} fluctuation={state.ArenaFluctuationLevel} npcLevelScale={state.ArenaFluctuationLevel / 385d:0.###} " +
+                $"area={request.SelectAreaId} stage={request.StageId} mark={area.MarkId} waves={waveCount}");
             return true;
         }
 
@@ -499,6 +510,8 @@ namespace AscNet.GameServer.Handlers
                 throw new InvalidDataException($"AreaStage {area.Id} has invalid StageId {stageId} at ArenaIndex {arenaIndex}.");
             return stageId;
         }
+
+        internal static NotifyArenaActivity BuildActivityForCommand(Player player) => BuildActivity(player, null);
 
         private static NotifyArenaActivity BuildActivity(Player player, long? now)
         {
@@ -675,8 +688,13 @@ namespace AscNet.GameServer.Handlers
 
             ReconcileLive(session);
             Player player = session.player;
+            UpdateResult result = Player.collection.UpdateOne(
+                current => current.Id == player.Id,
+                Builders<Player>.Update.Set(current => current.SimulatedBattlefield.ArenaFluctuationLevel, level));
+            if (!result.IsAcknowledged || result.MatchedCount != 1)
+                throw new CommandMessageCallbackException("Fluctuation could not be saved for this player.");
+
             player.SimulatedBattlefield!.ArenaFluctuationLevel = level;
-            player.Save();
             session.SendPush(BuildActivity(player, null));
         }
 
