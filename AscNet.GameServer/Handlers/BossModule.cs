@@ -946,8 +946,11 @@ namespace AscNet.GameServer.Handlers
                     && state.BossTotalScore >= row.NeedScore)
                 .OrderByDescending(row => row.LevelType)
                 .FirstOrDefault();
+            int bossGroupId = Groups.Value.ContainsKey(state.BossChallengeBossGroupOverride)
+                ? state.BossChallengeBossGroupOverride
+                : challengeGrade?.BossGroupId ?? 0;
             if (challengeGrade is null
-                || !Groups.Value.TryGetValue(challengeGrade.BossGroupId, out BossSingleGroupTable? group))
+                || !Groups.Value.TryGetValue(bossGroupId, out BossSingleGroupTable? group))
                 return null;
 
             List<(int LogicalId, int TableId)> sections = group.SectionId
@@ -971,6 +974,45 @@ namespace AscNet.GameServer.Handlers
             state.BossChallengeSelectedSection = selectedSection.TableId;
             state.BossChallengeSelectedFeatureGroup = featureGroupId;
             return (challengeGrade.LevelType, selectedSection.TableId, featureGroupId);
+        }
+
+        internal static IReadOnlyList<int> GetIntensiveBossGroupsForCommand() =>
+            Groups.Value.Keys.Where(id => id is >= 1 and <= 7).Order().ToArray();
+
+        internal static IReadOnlyList<int> GetIntensiveZonesForCommand(Session session)
+        {
+            SimulatedBattlefieldState state = session.player.SimulatedBattlefield ?? new();
+            BossSingleGradeTable? grade = state.BossLevelType > 0 ? ResolveGrade(state.BossLevelType) : null;
+            BossSingleChallengeGradeTable? challenge = ChallengeGrades.Value
+                .Where(row => grade is not null && grade.GradeType >= row.NeedGradeType && state.BossTotalScore >= row.NeedScore)
+                .OrderByDescending(row => row.LevelType)
+                .FirstOrDefault();
+            int groupId = Groups.Value.ContainsKey(state.BossChallengeBossGroupOverride)
+                ? state.BossChallengeBossGroupOverride
+                : challenge?.BossGroupId ?? 0;
+            return Groups.Value.GetValueOrDefault(groupId)?.SectionId
+                .Where(HasCurrentSection).Distinct().ToArray() ?? [];
+        }
+
+        internal static void SetIntensiveBossFromCommand(Session session, int groupId)
+        {
+            if (!GetIntensiveBossGroupsForCommand().Contains(groupId))
+                throw new CommandMessageCallbackException("Intensive boss must be between 1 and 7. Use /ppc intensive bosses.");
+            SimulatedBattlefieldState state = session.player.SimulatedBattlefield ??= new();
+            state.BossChallengeBossGroupOverride = groupId;
+            state.BossChallengeSelectedSection = 0;
+            session.player.Save();
+            throw new CommandMessageCallbackException($"Intensive boss group set to {groupId}. Use /ppc intensive zones to list its zones.");
+        }
+
+        internal static void SetIntensiveZoneFromCommand(Session session, int sectionId)
+        {
+            SimulatedBattlefieldState state = session.player.SimulatedBattlefield ??= new();
+            if (!GetIntensiveZonesForCommand(session).Contains(sectionId))
+                throw new CommandMessageCallbackException("That zone is not available for the selected intensive boss. Use /ppc intensive zones.");
+            state.BossChallengeSelectedSection = sectionId;
+            session.player.Save();
+            throw new CommandMessageCallbackException($"Intensive zone set to {sectionId}.");
         }
  
         private static int ChallengeDisplayTotal(SimulatedBattlefieldState state, int sectionId)
@@ -1412,12 +1454,13 @@ namespace AscNet.GameServer.Handlers
             int bossScore = ScoreBySteps(bossLostRatio, bossStep, bossPoints, stage.BossLoseHpScore);
             int passTime = Math.Max(1, stage.PassTimeLimit);
             int timeLeft = Math.Clamp(checked((int)settle.LeftTime), 0, passTime);
+            int clearTime = Math.Clamp(passTime - timeLeft - 1, 0, passTime);
             int activeFrames = checked((int)Math.Max(
                 0,
                 settle.SettleFrame - settle.StartFrame - settle.PauseFrame));
             int fightTime = activeFrames / FightFramesPerSecond;
             int killTime = Math.Clamp(fightTime, 0, passTime);
-            double timePenalty = timeCoefficient * (killTime + 1d) * (2d * passTime - 1d - killTime);
+            double timePenalty = timeCoefficient * (clearTime + 1d) * (2d * passTime - 1d - clearTime);
             int timeScore = Math.Clamp(
                 checked((int)Math.Floor(stage.LeftTimeScore - timePenalty)),
                 0,
@@ -1692,6 +1735,8 @@ namespace AscNet.GameServer.Handlers
         private static void ResetCycle(SimulatedBattlefieldState state, int playerLevel, int activity)
         {
             state.BossLevelType = 0;
+            state.BossChallengeBossGroupOverride = 0;
+            state.BossChallengeSelectedSection = 0;
             state.BossList = [];
             state.BossListOptions = BuildBossListOptions(state, playerLevel, activity);
             TrySelectOnlyOption(state);

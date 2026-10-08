@@ -713,7 +713,7 @@ namespace AscNet.GameServer.Handlers
         [RequestPacketHandler("QueryPlayerDetailRequest")]
         public static void QueryPlayerDetailRequestHandler(Session session, Packet.Request packet)
         {
-            session.SendResponse(new QueryPlayerDetailResponse() { Code = 1 }, packet.Id);
+            session.SendResponse(new QueryPlayerDetailResponse(), packet.Id);
         }
 
         // TODO: "Save" button in Details section of account info menu

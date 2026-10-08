@@ -199,6 +199,9 @@ namespace AscNet.Common.Database
         [BsonElement("boss_challenge_selected_section")]
         public int BossChallengeSelectedSection { get; set; }
 
+        [BsonElement("boss_challenge_boss_group_override")]
+        public int BossChallengeBossGroupOverride { get; set; }
+
         [BsonElement("boss_challenge_selected_feature_group")]
         public int BossChallengeSelectedFeatureGroup { get; set; }
 
