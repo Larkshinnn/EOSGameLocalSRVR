@@ -263,7 +263,15 @@ namespace AscNet.GameServer.Handlers
             public int BuffId { get; set; }
             public string Name { get; set; } = string.Empty;
             public List<string> Aliases { get; set; } = new();
+            // ArenaAreaBuffDetails.Icon file names (without extension) of this element's weathers.
+            public List<string> WeatherIcons { get; set; } = new();
         }
+
+        // Weather icon names matching the zone's buff elements; empty when no element of the zone names any.
+        private static HashSet<string> ZoneWeatherIcons(AreaStageTable area) => area.BuffIds
+            .Where(buffId => buffId > 0 && Catalog.Value.ElementByBuffId.ContainsKey(buffId))
+            .SelectMany(buffId => Catalog.Value.ElementByBuffId[buffId].WeatherIcons)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         private sealed class ZoneEncounterType
         {

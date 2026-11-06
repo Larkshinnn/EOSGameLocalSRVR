@@ -30,5 +30,9 @@
     "SettlementGoods": [
       { "RewardType": 1, "TemplateId": 62738, "Count": 85 }
     ]
+  },
+  "ArenaMarkOverrides": {
+    "Policy": "AscNet policy (user-requested 2026-11-06), not retail data: replaces individual Mark.tsv score expressions for the listed MarkId. Mark 5 damage weight is lowered from EnemyHp/25*2 so a 45-wave, ~284M-damage clear scores about 17M instead of 27M. Remove an entry to restore the table expression.",
+    "Marks": { "5": { "EnemyHpPoint": "EnemyHp/45*2" } }
   }
 }

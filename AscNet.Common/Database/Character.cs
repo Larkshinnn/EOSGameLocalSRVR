@@ -841,8 +841,11 @@ namespace AscNet.Common.Database
                 if (!skillIdsByGroupId.TryGetValue(groupId, out IReadOnlyList<uint>? groupSkillIds))
                     continue;
                 uint skillId = groupSkillIds.FirstOrDefault();
+                // Only skills whose unlock (the Level 0 row) is rank-gated level with rank. Regular leveled skills
+                // (e.g. the xx23 class skills) start at Level 1 and merely require a rank on their upgrade rows;
+                // treating them as rank-gated computed target 0 and removed them on a rank sync.
                 if (skillId == 0 || !upgradesBySkillId.TryGetValue((int)skillId, out IReadOnlyList<CharacterSkillUpgradeTable>? upgrades)
-                    || !upgrades.Any(upgrade => upgrade.ConditionId.Any(id =>
+                    || !upgrades.Any(upgrade => upgrade.Level == 0 && upgrade.ConditionId.Any(id =>
                         tableIndexes.ConditionsById.TryGetValue(id, out ConditionTable? condition) && condition.Type == 13105)))
                     continue;
 

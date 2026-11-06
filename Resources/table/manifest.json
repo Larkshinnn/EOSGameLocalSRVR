@@ -559,6 +559,20 @@
       ]
     },
     {
+      "columns": 5,
+      "contentSha256": "95a582be8e9468e330bc42ddc6ec031b433bc42cae77af6d7a75ba799725c89b",
+      "filter": "all",
+      "naturalKey": "Id",
+      "path": "client/fuben/arena/ArenaAreaBuffDetails.tsv",
+      "rows": 54,
+      "source": [
+        "client/fuben/arena/ArenaAreaBuffDetails.json"
+      ],
+      "transformation": [
+        "Imported from alt3ri/PGR_Data@e7c752ff9914b20272d5dc287e4d0b7c7223d0c6 EN/bytes/client/fuben/arena/ArenaAreaBuffDetails.json (sha256:4d2961a70c1c995922288baafe7e872e58273c878b7265a39ad68d0e92d1a248); Warzone weather (fight event) names, descriptions and element icons"
+      ]
+    },
+    {
       "columns": 4,
       "contentSha256": "8250e47f76837b2ac2edaf89ab5fa9f4e34556f9e06d89f99c0b56c004234a7a",
       "filter": "all",

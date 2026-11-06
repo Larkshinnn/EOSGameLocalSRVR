@@ -34,7 +34,9 @@ internal static class ArenaStageDataset
             return null;
         if (stage.Generator is { } generator)
             return $"MarkId {stage.MarkId} generator from area {stage.AreaId}: {generator.WaveCount} single-enemy waves, "
-                + $"bosses [{string.Join(", ", generator.BossNpcIds)}], repeatable [{string.Join(", ", generator.RepeatableNpcIds)}]";
+                + $"bosses [{string.Join(", ", generator.BossNpcIds)}]"
+                + (generator.BossWaveInterval > 0 ? $" every {generator.BossWaveInterval} waves" : "")
+                + $", repeatable [{string.Join(", ", generator.RepeatableNpcIds)}]";
         return $"MarkId {stage.MarkId} waves from area {stage.AreaId}: {stage.NpcGroupRefs.Count} waves, NPCs ["
             + string.Join(", ", stage.NpcGroupRefs
                 .SelectMany(groupRef => Data.Value.GroupDefinitions[groupRef].NpcRefs)
@@ -105,6 +107,11 @@ internal static class ArenaStageDataset
             waveNpcs.AddRange(npcTemplates.Repeatable);
 
         uint state = Seed(activityNo, playerId, areaId, stageId);
+        if (generator.BossWaveInterval > 0)
+        {
+            List<List<JObject>> intervalWaves = GenerateIntervalBossWaves(generator, bossTemplates, waveNpcs, npcTemplates.Repeatable, ref state);
+            return generator.HpRamp ? ApplyHpRamp(generator, intervalWaves) : intervalWaves;
+        }
         while (waveNpcs.Count + bossTemplates.Count < generator.WaveCount)
             waveNpcs.Add(npcTemplates.Repeatable[(int)(Next(ref state) % (uint)npcTemplates.Repeatable.Count)]);
 
@@ -122,7 +129,84 @@ internal static class ArenaStageDataset
                 generatedWaves[index] = waveNpcs[normalIndex++];
         }
 
-        return generatedWaves.Select(npc => new List<JObject> { npc! }).ToList();
+        List<List<JObject>> randomWaves = generatedWaves.Select(npc => new List<JObject> { npc! }).ToList();
+        return generator.HpRamp ? ApplyHpRamp(generator, randomWaves) : randomWaves;
+    }
+
+    // AscNet policy (user-requested 2026-11-06; retail wave levels are unavailable): keep each wave's enemy type but
+    // re-level it so table HP (Attrib.Life + AttribPromoted.Life x (Level - 1)) rises with the wave number. Regular
+    // enemies ramp linearly from the lowest to the highest regular template HP, bosses from the lowest to the highest
+    // boss template HP, over the whole run. Fluctuation still scales the resulting levels afterwards.
+    private static List<List<JObject>> ApplyHpRamp(Generator generator, List<List<JObject>> waves)
+    {
+        HashSet<int> bossIds = generator.BossNpcIds.ToHashSet();
+        List<(int NpcId, double Hp)> templates = generator.NpcDefinitions
+            .Select(npc => (NpcId: npc.Value<int>("NpcId"), Hp: TableHp(npc.Value<int>("NpcId"), npc.Value<int?>("Level") ?? 0)))
+            .Where(template => template.Hp > 0)
+            .ToList();
+        (double Min, double Max)? Range(bool boss)
+        {
+            List<double> values = templates.Where(template => bossIds.Contains(template.NpcId) == boss).Select(template => template.Hp).ToList();
+            return values.Count == 0 ? null : (values.Min(), values.Max());
+        }
+        (double Min, double Max)? regular = Range(false), boss = Range(true);
+
+        List<List<JObject>> result = new(waves.Count);
+        for (int index = 0; index < waves.Count; index++)
+        {
+            double fraction = waves.Count <= 1 ? 1 : index / (double)(waves.Count - 1);
+            result.Add(waves[index].Select(template =>
+            {
+                int npcId = template.Value<int>("NpcId");
+                (double Min, double Max)? range = bossIds.Contains(npcId) ? boss : regular;
+                if (range is not { } bounds || !HpPerLevel.Value.TryGetValue(npcId, out (double Base, double PerLevel) life) || life.PerLevel <= 0)
+                    return template;
+                double target = bounds.Min + (bounds.Max - bounds.Min) * fraction;
+                JObject npc = (JObject)template.DeepClone();
+                npc["Level"] = Math.Max(1, (int)Math.Ceiling((target - life.Base) / life.PerLevel) + 1);
+                return npc;
+            }).ToList());
+        }
+        return result;
+    }
+
+    private static double TableHp(int npcId, int level) =>
+        level > 0 && HpPerLevel.Value.TryGetValue(npcId, out (double Base, double PerLevel) life) ? life.Base + life.PerLevel * (level - 1) : 0;
+
+    // NpcId -> (Attrib.Life, AttribPromoted.Life) decoded from the tables' Q32.32 fixed-point hex.
+    private static readonly Lazy<Dictionary<int, (double Base, double PerLevel)>> HpPerLevel = new(() =>
+    {
+        static double Fixed(string? text) => string.IsNullOrEmpty(text) || text.Length < 3 ? 0
+            : long.Parse(text.AsSpan(2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture) / 4294967296d;
+        Dictionary<int, string?> life = TableReaderV2.Parse<AscNet.Table.V2.share.attrib.AttribTable>().ToDictionary(row => row.Id, row => (string?)row.Life);
+        Dictionary<int, string?> promoted = TableReaderV2.Parse<AscNet.Table.V2.share.attrib.AttribPromotedTable>().ToDictionary(row => row.Id, row => (string?)row.Life);
+        return TableReaderV2.Parse<AscNet.Table.V2.share.fight.npc.NpcTable>()
+            .Where(npc => life.ContainsKey(npc.AttribId) && promoted.ContainsKey(npc.PromotedId))
+            .ToDictionary(npc => npc.Id, npc => (Fixed(life[npc.AttribId]), Fixed(promoted[npc.PromotedId])));
+    });
+
+    // AscNet policy (user-requested 2026-11-06; retail wave order is unavailable): every BossWaveInterval-th wave
+    // (4, 8, 12, ...) is a boss, cycling BossNpcIds in configured order; the other waves are the shuffled regular pool.
+    private static List<List<JObject>> GenerateIntervalBossWaves(
+        Generator generator, List<JObject> bossTemplates, List<JObject> waveNpcs, List<JObject> repeatable, ref uint state)
+    {
+        List<JObject> bosses = generator.BossNpcIds
+            .Select(id => bossTemplates.Single(npc => npc.Value<int>("NpcId") == id)).ToList();
+        int bossWaves = generator.WaveCount / generator.BossWaveInterval;
+        while (waveNpcs.Count + bossWaves < generator.WaveCount)
+            waveNpcs.Add(repeatable[(int)(Next(ref state) % (uint)repeatable.Count)]);
+        Shuffle(waveNpcs, ref state);
+
+        List<List<JObject>> waves = new(generator.WaveCount);
+        int normalIndex = 0, bossIndex = 0;
+        for (int wave = 1; wave <= generator.WaveCount; wave++)
+        {
+            JObject npc = wave % generator.BossWaveInterval == 0
+                ? bosses[bossIndex++ % bosses.Count]
+                : waveNpcs[normalIndex++];
+            waves.Add([npc]);
+        }
+        return waves;
     }
 
     private static void Shuffle<T>(List<T> values, ref uint state)
@@ -238,6 +322,8 @@ internal static class ArenaStageDataset
                 || generator.IncludeEveryNpcOnce && generator.WaveCount < generator.RepeatableNpcIds.Count + generator.UniqueOnceNpcIds.Count
                 || generator.WaveCount < generator.BossNpcIds.Count
                 || generator.MinimumBossWaveGap < 1
+                || generator.BossWaveInterval < 0
+                || generator.BossWaveInterval > 0 && (generator.BossNpcIds.Count == 0 || generator.BossWaveInterval > generator.WaveCount)
                 || generator.BossNpcIds.Except(generator.UniqueOnceNpcIds).Any()
                 || generator.RepeatableNpcIds.Intersect(generator.UniqueOnceNpcIds).Any()
                 || configuredIds.Distinct().Count() != configuredIds.Length
@@ -272,6 +358,10 @@ internal static class ArenaStageDataset
         public List<int> UniqueOnceNpcIds { get; set; } = new();
         public List<int> BossNpcIds { get; set; } = new();
         public int MinimumBossWaveGap { get; set; } = 3;
+        // > 0: every Nth wave is a boss, cycling BossNpcIds in order (bosses then repeat). 0: each boss once, random slots.
+        public int BossWaveInterval { get; set; }
+        // true: re-level each wave's enemy so table HP rises with the wave number (see ApplyHpRamp).
+        public bool HpRamp { get; set; }
     }
 
     private sealed class Stage

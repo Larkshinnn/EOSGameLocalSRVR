@@ -123,6 +123,10 @@ namespace AscNet.GameServer.Handlers
             TableReaderV2.Parse<ArenaGroupFightEventTable>()
                 .OrderBy(group => group.Id)
                 .ToList());
+        private static readonly Lazy<Dictionary<int, string>> WeatherIcons = new(() =>
+            TableReaderV2.Parse<AscNet.Table.V2.client.fuben.arena.ArenaAreaBuffDetailsTable>()
+                .Where(row => !string.IsNullOrEmpty(row.Icon))
+                .ToDictionary(row => row.Id, row => Path.GetFileNameWithoutExtension(row.Icon!)));
 
         [RequestPacketHandler("JoinActivityRequest")]
         public static void JoinActivityRequestHandler(Session session, Packet.Request packet)
@@ -260,10 +264,10 @@ namespace AscNet.GameServer.Handlers
 
             Dictionary<string, double> metrics = Metrics(result);
             metrics["LeftTime"] = timeLeft;
-            int enemyPoint = Evaluate(mark.EnemyHpPoint, metrics, mark.MaxEnemyHpPoint);
-            int myHpPoint = Evaluate(mark.MyHpPoint, metrics, mark.MaxMyHpPoint);
-            int timePoint = Evaluate(mark.TimePoint, metrics, mark.MaxTimePoint);
-            int npcPoint = Evaluate(mark.NpcGroupPoint, metrics, mark.MaxNpcGroupPoint);
+            int enemyPoint = Evaluate(MarkExpression(mark.MarkId, "EnemyHpPoint", mark.EnemyHpPoint), metrics, mark.MaxEnemyHpPoint);
+            int myHpPoint = Evaluate(MarkExpression(mark.MarkId, "MyHpPoint", mark.MyHpPoint), metrics, mark.MaxMyHpPoint);
+            int timePoint = Evaluate(MarkExpression(mark.MarkId, "TimePoint", mark.TimePoint), metrics, mark.MaxTimePoint);
+            int npcPoint = Evaluate(MarkExpression(mark.MarkId, "NpcGroupPoint", mark.NpcGroupPoint), metrics, mark.MaxNpcGroupPoint);
             int point = Math.Clamp(enemyPoint + myHpPoint + timePoint + npcPoint, mark.MinPoint, mark.MaxPoint);
             session.log.Info(
                 $"Warzone settle uid={session.player.PlayerData.Id} activity={state.ArenaActivityNo} fluctuation={state.ArenaFluctuationLevel} " +
@@ -482,6 +486,11 @@ namespace AscNet.GameServer.Handlers
                 selected);
             return new AreaDataResponse { Code = 0, TotalPoint = state.ArenaPoint, AreaList = areas, AreaDistributeMaxPointDict = maxima, GroupFightEvents = events };
         }
+        // Weather (fight event) groups per zone. AscNet policy: retail assigns each zone's weather per activity and that
+        // assignment is unavailable. A zone uses the newest weather of its element: among groups whose every weather
+        // carries one of the zone element's icons (ArenaAreaBuffDetails.Icon, mapped in warzone_zone_catalog.json), the
+        // one with the highest (most recently authored) fight event id. Zones without a mapped element, or with no
+        // matching group, keep the stable per-activity pick from all groups.
         private static List<int> SelectedGroupFightEventIds(int activityNo, long playerId, IReadOnlyList<int> selectedAreas)
         {
             if (FightEventGroups.Value.Count == 0)
@@ -489,6 +498,17 @@ namespace AscNet.GameServer.Handlers
 
             return selectedAreas.Select(areaId =>
             {
+                HashSet<string> icons = AreaStages.Value.TryGetValue(areaId, out AreaStageTable? area) ? ZoneWeatherIcons(area) : [];
+                ArenaGroupFightEventTable? newest = icons.Count == 0 ? null : FightEventGroups.Value
+                    .Where(group => group.FightEvents.Any(eventId => eventId > 0)
+                        && group.FightEvents.Where(eventId => eventId > 0).All(eventId =>
+                            WeatherIcons.Value.TryGetValue(eventId, out string? icon) && icons.Contains(icon)))
+                    .OrderByDescending(group => group.FightEvents.Max())
+                    .ThenBy(group => group.FightEvents.Count(eventId => eventId > 0))
+                    .ThenByDescending(group => group.Id)
+                    .FirstOrDefault();
+                if (newest is not null)
+                    return newest.Id;
                 int index = (int)(StableAreaHash(activityNo, playerId, areaId) % (uint)FightEventGroups.Value.Count);
                 return FightEventGroups.Value[index].Id;
             }).ToList();
@@ -913,6 +933,12 @@ namespace AscNet.GameServer.Handlers
                 return token.Value<double>();
             return 0;
         }
+
+        // AscNet policy (user-requested): simulated_battlefield.json ArenaMarkOverrides.Marks[MarkId][field] replaces a
+        // Mark.tsv score expression; without an entry the authoritative table expression is used.
+        private static string? MarkExpression(int markId, string field, string? tableExpression) =>
+            Config.Value["ArenaMarkOverrides"]?["Marks"]?[markId.ToString(System.Globalization.CultureInfo.InvariantCulture)]?[field]?.Value<string>()
+                is { Length: > 0 } overridden ? overridden : tableExpression;
 
         private static int Evaluate(string? expression, Dictionary<string, double> values, int maximum)
         {

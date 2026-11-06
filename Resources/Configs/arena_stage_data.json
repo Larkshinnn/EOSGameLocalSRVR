@@ -316,7 +316,9 @@
         ],
         "RepeatableNpcIds": [90990, 90950, 90910, 90780],
         "UniqueOnceNpcIds": [81300, 81600, 81800],
-        "BossNpcIds": [81300, 81600, 81800],
+        "BossNpcIds": [81600, 81800, 81300],
+        "BossWaveInterval": 4,
+        "HpRamp": true,
         "MinimumBossWaveGap": 3
       },
       "PassTimeLimit": 300,

@@ -40,6 +40,27 @@ internal partial class Program
         ValidateVersion47GeneralSkillPreFightCompatibility();
         ValidateVersion47ObserverPreFightCompatibility();
         ValidateVersion47QualityGatedSkillReconciliation();
+        ValidateRankSyncKeepsLeveledClassSkills();
+    }
+
+    // Regular leveled skills (no Level 0 unlock row) whose upgrade rows require a rank, e.g. the xx23 class skills,
+    // are not rank-gated unlocks: a /character rank sync must neither remove them nor reset their level.
+    private static void ValidateRankSyncKeepsLeveledClassSkills()
+    {
+        foreach ((int characterId, uint skillId) in new[] { (1431003, 143323u), (1021001, 102123u) })
+        {
+            AssertEqual(false, TableReaderV2.Parse<CharacterSkillUpgradeTable>().Any(row => row.SkillId == (int)skillId && row.Level == 0),
+                $"class skill {skillId} has no Level 0 unlock row");
+            AscNet.Common.Database.Character roster = CreateTestCharacterRoster(characterId, 80);
+            CharacterData character = RequiredCharacterData(roster, characterId);
+            character.Quality = 4;
+            character.Star = 0;
+            character.SkillList.RemoveAll(skill => skill.Id == skillId);
+            character.SkillList.Add(new CharacterSkill { Id = skillId, Level = 7 });
+            roster.UnlockQualityGatedSkills(character, [], synchronizeToRank: true);
+            AssertEqual(7, character.SkillList.SingleOrDefault(skill => skill.Id == skillId)?.Level ?? 0,
+                $"rank sync keeps class skill {skillId} of {characterId} at its level");
+        }
     }
 
     private static void ValidateVersion47QualityGatedSkillReconciliation()

@@ -28,6 +28,13 @@ namespace AscNet.Test
             MethodInfo selectArenaAreas = RequiredMethod(arenaModule, "SelectedAreas", BindingFlags.Static | BindingFlags.NonPublic,
                 [typeof(int), typeof(long), typeof(ChallengeAreaTable), typeof(int)]);
 
+            // AscNet policy score override: Mark 5 damage expression comes from simulated_battlefield.json, others from Mark.tsv.
+            MethodInfo markExpression = RequiredMethod(arenaModule, "MarkExpression", BindingFlags.Static | BindingFlags.NonPublic,
+                [typeof(int), typeof(string), typeof(string)]);
+            AssertEqual("EnemyHp/45*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage override");
+            AssertEqual("NpcGroup*50000*2", (string?)markExpression.Invoke(null, [5, "NpcGroupPoint", "NpcGroup*50000*2"]), "Mark 5 wave expression unchanged");
+            AssertEqual("EnemyHp/100", (string?)markExpression.Invoke(null, [3, "EnemyHpPoint", "EnemyHp/100"]), "Mark 3 keeps table expression");
+
             // Automatic weekly selection must never pick a command-only (MarkId 5 boss generator) zone.
             foreach (ChallengeAreaTable challenge in challenges)
             {
@@ -110,6 +117,36 @@ namespace AscNet.Test
                 AssertEqual(true, waves.All(wave => wave["NpcList"]!.Count() == 1), $"{name} one enemy per wave");
                 HashSet<int> npcIds = waves.Select(wave => wave["NpcList"]![0]!.Value<int>("NpcId")).ToHashSet();
                 AssertEqual(true, new[] { 81_300, 81_600, 81_800 }.All(npcIds.Contains), $"{name} uses the MarkId 5 boss generator bosses");
+                // AscNet policy: every 4th wave is a boss, cycling 81600 -> 81800 -> 81300; the other waves are regular enemies.
+                int[] waveNpcIds = waves.Select(wave => wave["NpcList"]![0]!.Value<int>("NpcId")).ToArray();
+                int[] bossCycle = [81_600, 81_800, 81_300];
+                for (int wave = 1; wave <= waveNpcIds.Length; wave++)
+                {
+                    int npcId = waveNpcIds[wave - 1];
+                    if (wave % 4 == 0)
+                        AssertEqual(bossCycle[(wave / 4 - 1) % 3], npcId, $"{name} wave {wave} boss");
+                    else
+                        AssertEqual(false, bossCycle.Contains(npcId), $"{name} wave {wave} is a regular enemy");
+                }
+                // AscNet policy HpRamp: table HP rises with the wave number, separately for regular enemies and bosses.
+                Dictionary<int, AscNet.Table.V2.share.fight.npc.NpcTable> npcRows = TableReaderV2.Parse<AscNet.Table.V2.share.fight.npc.NpcTable>().ToDictionary(row => row.Id);
+                Dictionary<int, string> lifeRows = TableReaderV2.Parse<AscNet.Table.V2.share.attrib.AttribTable>().ToDictionary(row => row.Id, row => row.Life);
+                Dictionary<int, string> growRows = TableReaderV2.Parse<AscNet.Table.V2.share.attrib.AttribPromotedTable>().ToDictionary(row => row.Id, row => row.Life);
+                double Fixed(string text) => long.Parse(text[2..], System.Globalization.NumberStyles.HexNumber) / 4294967296d;
+                double WaveHp(JToken wave)
+                {
+                    JToken npc = wave["NpcList"]![0]!;
+                    var row = npcRows[npc.Value<int>("NpcId")];
+                    return Fixed(lifeRows[row.AttribId]) + Fixed(growRows[row.PromotedId]) * (npc.Value<int>("Level") - 1);
+                }
+                double previousRegular = 0, previousBoss = 0;
+                for (int wave = 1; wave <= waves.Count; wave++)
+                {
+                    double hp = WaveHp(waves[wave - 1]);
+                    bool isBoss = wave % 4 == 0;
+                    AssertEqual(true, hp >= (isBoss ? previousBoss : previousRegular), $"{name} wave {wave} HP does not drop");
+                    if (isBoss) previousBoss = hp; else previousRegular = hp;
+                }
                 AssertIntegerList(areaStages[areaId].BuffIds.Where(buffId => buffId > 0).Select(Convert.ToInt64).ToList(),
                     response.FightData.EventIds.Take(areaStages[areaId].BuffIds.Count(buffId => buffId > 0)).Select(Convert.ToInt64).ToList(),
                     $"{name} zone buffs from AreaStage");
@@ -120,10 +157,17 @@ namespace AscNet.Test
             string message = Run("warzone", "set", "ice");
             AssertEqual(7, player.SimulatedBattlefield.ArenaZoneOverrideAreaId, "/warzone set ice picks the Ice Desperate Fight zone");
             AssertContains("7 Crimson Frostland [Ice] Boss", message, "/warzone set ice message");
-            AssertContains("bosses [81300, 81600, 81800]", message, "/warzone set ice enemy profile");
+            AssertContains("bosses [81600, 81800, 81300] every 4 waves", message, "/warzone set ice enemy profile");
             int[] eliteAreas = JoinAndReadAreas("War Zone Elite ice");
             AssertEqual(7, eliteAreas[0], "War Zone forced Ice zone offered first");
             AssertBossPreFight(7, "War Zone Elite ice boss pre-fight");
+            // The zone's weather (last pre-fight event) must share the zone buff's element (ArenaAreaBuffDetails icon).
+            Dictionary<int, string> weatherIcons = TableReaderV2.Parse<AscNet.Table.V2.client.fuben.arena.ArenaAreaBuffDetailsTable>()
+                .ToDictionary(row => row.Id, row => Path.GetFileNameWithoutExtension(row.Icon ?? string.Empty));
+            int iceWeather = Convert.ToInt32(PreFight(7, "War Zone Elite ice weather").FightData.EventIds.Last());
+            AssertEqual("IconAffixBingshuangUp", weatherIcons.GetValueOrDefault(iceWeather), $"Ice zone weather {iceWeather} is an Ice weather");
+            AssertEqual(weatherIcons.Where(pair => pair.Value == "IconAffixBingshuangUp").Max(pair => pair.Key), iceWeather,
+                "Ice zone uses the newest Ice weather");
 
             _ = Run("warzone", "set", "fire");
             AssertEqual(8, player.SimulatedBattlefield.ArenaZoneOverrideAreaId, "/warzone set fire picks a distinct zone");
