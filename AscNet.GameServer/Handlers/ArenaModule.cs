@@ -426,17 +426,22 @@ namespace AscNet.GameServer.Handlers
             ArenaGroupFightEventTable? group = selectedAreaIndex < groupIds.Count
                 ? FightEventGroups.Value.FirstOrDefault(candidate => candidate.Id == groupIds[selectedAreaIndex])
                 : null;
+            // Client contract (XArenaAgency.PreFight / GetCurrentFightBuffId): ArenaSelectIndex is the 0-based index of
+            // the AreaStage buff picked in the zone title list (BuffIds/BuffName), not a weather index. The area's
+            // weather group is shown as a fixed list (XUiArenaChapterDetail._RefreshBuffList), so all of its events apply.
+            List<int> zoneBuffIds = area.BuffIds.Where(eventId => eventId > 0).ToList();
             if (group is null
                 || request.ArenaSelectIndex < 0
-                || request.ArenaSelectIndex >= group.FightEvents.Count)
+                || request.ArenaSelectIndex >= Math.Max(1, zoneBuffIds.Count))
             {
                 return false;
             }
 
-            response.FightData.EventIds = area.BuffIds
-                .Where(eventId => eventId > 0)
+            response.FightData.EventIds = zoneBuffIds
+                .Skip(request.ArenaSelectIndex)
+                .Take(1)
+                .Concat(group.FightEvents.Where(eventId => eventId > 0))
                 .Cast<dynamic>()
-                .Append(group.FightEvents[request.ArenaSelectIndex])
                 .ToList();
             response.FightData.FightEventsWithLevel = new List<dynamic>();
             if (!ArenaStageDataset.TryHydrate(

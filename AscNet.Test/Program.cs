@@ -24417,10 +24417,12 @@ namespace AscNet.Test
             if (arenaDatasetJson.Contains("\"FightData\"", StringComparison.Ordinal)
                 || Directory.EnumerateFiles(Path.GetDirectoryName(arenaDatasetPath)!, "*PreFightResponse*", SearchOption.AllDirectories).Any())
                 throw new InvalidDataException("War Zone resources must not contain a copied PreFightResponse snapshot.");
+            // Client contract: ArenaSelectIndex picks one AreaStage buff; every event of the area's weather group applies.
             AssertIntegerList(
-                selectedAreaStage.BuffIds.Select(Convert.ToInt64).Append(selectedFightEvent).ToList(),
+                selectedAreaStage.BuffIds.Where(buffId => buffId > 0).Skip(arenaSelectIndex).Take(1).Select(Convert.ToInt64)
+                    .Concat(selectedGroup.FightEvents.Where(eventId => eventId > 0).Select(Convert.ToInt64)).ToList(),
                 arenaPreFight.FightData.EventIds.Select(Convert.ToInt64).ToList(),
-                "War Zone preflight AreaStage buffs and selected group event");
+                "War Zone preflight selected AreaStage buff and whole weather group");
 
             FightSettleResult arenaSettle = new()
             {

@@ -15,7 +15,7 @@
 
         private ThreadSafeStreamWriter()
         {
-            _writer = new StreamWriter(_logFilePath, true);
+            _writer = new StreamWriter(_logFilePath, true) { AutoFlush = true };
         }
 
         public static ThreadSafeStreamWriter Instance

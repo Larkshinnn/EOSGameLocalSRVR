@@ -67,6 +67,10 @@ Id	FightEventIds[1]	Name	Desc
 66	2300066	Greedy Frost Ⅱ	When the Glaciation effect deals DMG, the Boss takes significantly increased Glaciation DMG for 10s, stacking up to 5 times. Duration resets every time the effect is triggered.
 67	2300067	Brutal Crash III	Upon a Critical Hit, significantly increases the Boss' Physical DMG taken, up to 6 stacks, lasting 10s. Duration resets every time it is triggered.
 68	2300068	Tidal Return II	When dealing Darkflow DMG, significantly increases Darkflow DMG taken by enemies for 10s, stacking up to 7 times. Duration resets every time it is triggered.
+69	2300069	Oblivion's Bloom II	For each orb pinged, significantly increases Dark DMG taken by the Boss for 10s, stacking up to 4 times. Duration resets every time it is triggered.
+70	2300070	Steel of Clarity II	Every time when casting Ultima Slash, significantly increases Ultima Slash DMG taken by the Boss and increases the user's Physical DMG dealt. Max 5 stacks. Lasts 10s. Duration resets every time it is triggered.
+71	2300071	Frostbound Chasm V	For each orb pinged, significantly increases Ice DMG taken by the Boss for 10s, stacking up to 3 times. Duration resets every time it is triggered.
+72	2300072	Greedy Frost III	When the Glaciation effect deals DMG, the Boss takes significantly increased Glaciation DMG for 10s, stacking up to 5 times. Duration resets every time the effect is triggered.
 1001	2301001	Web of Fate I	Boss HP increases by 50%.
 1002	2301002	Weapons & Bones I	Boss takes reduced DMG from all sources except Physical.
 1003	2301003	Scorching Realm I	Boss takes reduced DMG from all sources except Fire.
@@ -82,5 +86,3 @@ Id	FightEventIds[1]	Name	Desc
 1013	2301013	Ode to the Light I	Boss takes reduced DMG from all sources except Raydiance Effect.
 1014	2301014	Web of Fate II	Boss HP increases by 60%.
 1015	2301015	Web of Fate III	Boss HP increases by 70%.
-71	2300071	Frostbound Chasm V	For each orb pinged, significantly increases Ice DMG taken by the Boss for 10s, stacking up to 3 times. Duration resets every time it is triggered.
-72	2300072	Greedy Frost III	When the Glaciation effect deals DMG, the Boss takes significantly increased Glaciation DMG for 10s, stacking up to 5 times. Duration resets every time the effect is triggered.

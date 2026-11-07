@@ -250,6 +250,16 @@ internal partial class Program
         AssertEqual(true, expectedPlus.Count > 0, "occupied Border Pact chapter grants skill plus levels");
         AssertEqual(Newtonsoft.Json.JsonConvert.SerializeObject(expectedPlus),
             AssignFightSkillPlus(harness, 88_118, lotus), "occupied Border Pact sends NpcData.CharacterSkillPlus");
+        // A character whose quality Npc row is absent from the share Npc table still gets the plus (Career stands in for Npc.Type).
+        AscNet.Table.V2.share.character.quality.CharacterQualityTable? npcLess = TableReaderV2.Parse<AscNet.Table.V2.share.character.quality.CharacterQualityTable>()
+            .FirstOrDefault(row => TableReaderV2.Parse<AscNet.Table.V2.share.fight.npc.NpcTable>().All(npc => npc.Id != row.NpcId)
+                && session.character.Characters.All(owned => owned.Id != row.CharacterId));
+        if (npcLess is not null)
+        {
+            CharacterData npcLessCharacter = character.AddCharacter((uint)npcLess.CharacterId).Character;
+            AssertEqual(true, CharacterPower.GetAssignmentLevels(session, npcLessCharacter).Count > 0,
+                $"Border Pact skill plus covers character {npcLess.CharacterId} without a share Npc row");
+        }
 
         RunBorderPactCommand(session, "borderpact assign 2002 pianissimo");
         AssertEqual(0L, session.player.Assign.Chapters.Single(record => record.ChapterId == 2_002).CharacterId, "a character cannot occupy two Border Pact chapters");

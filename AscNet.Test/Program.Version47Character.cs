@@ -286,7 +286,7 @@ internal partial class Program
         }
         // These are the three compositions executed against the authoritative EN XTeam selector.
         AssertEqual("123001:1,123006:1,123027:1", Signature(Expected(observer, 5, 3)), "Owned full skills include both authored ice Amplifier effect rows");
-        AssertEqual("100086:1,123001:1,123005:1", Signature(Expected(observer, 2, 3)), "Owned full skills include both authored ice Tank effect rows");
+        AssertEqual("100086:1,123001:1,123005:1", Signature(Expected(observer, 8, 3)), "Owned full skills include both authored ice Breaker effect rows (4.9 CharacterObsTriggerMagic)");
         AssertEqual("123000:1,123005:1,200450:1", Signature(Expected(observer, 8, 2)), "Owned full skills include both authored fire Breaker effect rows");
         CharacterData tank = Character(1121003), support = Character(1211002), fireSupport = Character(1031004);
         CharacterData nihilTank = Character(1061003), fusion = Character(1421003);
@@ -294,7 +294,10 @@ internal partial class Program
         foreach (CharacterData subject in new[] { observer, trial.Character })
         {
             Check(subject, 5, tank, attacker);
-            Check(subject, 2, support, attacker);
+            Check(subject, 8, support, attacker);
+            // 4.9 CharacterObsTransform: Ice Breaker -> Amplifier, Ice Amplifier -> Breaker.
+            Check(subject, 5, Character(1431003), Character(1021007));
+            Check(subject, 8, Character(1291003), Character(1021007));
             Check(subject, 8, fireSupport, attacker);
             Check(subject, 9, nihilTank, attacker);
             Check(subject, 8, fusion, attacker);
@@ -335,7 +338,7 @@ internal partial class Program
         }
         int packetId = 12_710;
         foreach (var composition in new[] {
-            (Partner: tank, Career: 5), (Partner: support, Career: 2), (Partner: fireSupport, Career: 8),
+            (Partner: tank, Career: 5), (Partner: support, Career: 8), (Partner: fireSupport, Career: 8),
             (Partner: nihilTank, Career: 9), (Partner: fusion, Career: 8)
         })
         {

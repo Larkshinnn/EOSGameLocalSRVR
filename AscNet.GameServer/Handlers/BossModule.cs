@@ -640,6 +640,12 @@ namespace AscNet.GameServer.Handlers
                 }
             }
             ApplyChallengeFeatureEvents(request, response.FightData, session.player.SimulatedBattlefield);
+            if (stageType == 3)
+                session.log.Info(
+                    $"PPC intensive pre-fight uid={session.player.PlayerData.Id} stage={stageId} " +
+                    $"featureGroup={session.player.SimulatedBattlefield.BossChallengeSelectedFeatureGroup} " +
+                    $"buffPayload={JsonConvert.SerializeObject(request.BossSingleChallengeBuffGroup)} " +
+                    $"eventIds=[{string.Join(",", response.FightData.EventIds)}]");
 
             session.PendingBossSingleScore = null;
             response.FightData.FightCheckType = 1;
@@ -701,6 +707,12 @@ namespace AscNet.GameServer.Handlers
             _ = TryGetChallengeBuffGroup(fight.PreFight.PreFightData.BossSingleChallengeBuffGroup,
                 session.player.SimulatedBattlefield, out pendingBuffGroup, out pendingFeatureIds, out pendingBuffChoices);
             int buffGroup = pendingBuffGroup;
+            session.log.Info(
+                $"PPC settle uid={session.player.PlayerData.Id} stage={stageId} stageType={stageType} win={settle.IsWin} " +
+                $"leftTime={settle.LeftTime} score={bossResult.TotalScore} npcHp=[" + string.Join("; ",
+                    (settle.NpcHpInfo?.Values ?? Enumerable.Empty<NpcHp>())
+                        .Where(npc => npc.Type is 2 or 3)
+                        .Select(npc => $"type={npc.Type} hp={AttributeValue(npc, "Value"):0}/{AttributeValue(npc, "MaxValue"):0}")) + "]");
             session.PendingBossSingleScore = new BossSinglePendingScore
             {
                 StageId = stageId,

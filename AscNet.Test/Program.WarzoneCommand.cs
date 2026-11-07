@@ -31,7 +31,7 @@ namespace AscNet.Test
             // AscNet policy score override: Mark 5 damage expression comes from simulated_battlefield.json, others from Mark.tsv.
             MethodInfo markExpression = RequiredMethod(arenaModule, "MarkExpression", BindingFlags.Static | BindingFlags.NonPublic,
                 [typeof(int), typeof(string), typeof(string)]);
-            AssertEqual("EnemyHp/45*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage override");
+            AssertEqual("EnemyHp/55*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage override");
             AssertEqual("NpcGroup*50000*2", (string?)markExpression.Invoke(null, [5, "NpcGroupPoint", "NpcGroup*50000*2"]), "Mark 5 wave expression unchanged");
             AssertEqual("EnemyHp/100", (string?)markExpression.Invoke(null, [3, "EnemyHpPoint", "EnemyHp/100"]), "Mark 3 keeps table expression");
 
@@ -94,7 +94,7 @@ namespace AscNet.Test
                 AssertEqual(0, areas.Code, $"{name} AreaDataResponse code");
                 return JArray.FromObject(areas.AreaList!).Select(area => area.Value<int>("AreaId")).ToArray();
             }
-            PreFightResponse PreFight(int areaId, string name)
+            PreFightResponse PreFight(int areaId, string name, int selectIndex = 0)
             {
                 int id = ++packetId;
                 InvokeRegisteredRequestHandler(nameof(PreFightRequest), harness.Session, id, new PreFightRequest
@@ -102,7 +102,7 @@ namespace AscNet.Test
                     PreFightData = new PreFightRequest.PreFightRequestPreFightData
                     {
                         ChallengeCount = 1, StageId = checked((uint)areaStages[areaId].StageId[0]), SelectAreaId = areaId,
-                        ArenaSelectIndex = 0, CardIds = [], RobotIds = []
+                        ArenaSelectIndex = selectIndex, CardIds = [], RobotIds = []
                     }
                 });
                 PreFightResponse response = ReadResponsePayload<PreFightResponse>(harness, id, nameof(PreFightResponse), name, maxPacketsToRead: 128);
@@ -147,9 +147,19 @@ namespace AscNet.Test
                     AssertEqual(true, hp >= (isBoss ? previousBoss : previousRegular), $"{name} wave {wave} HP does not drop");
                     if (isBoss) previousBoss = hp; else previousRegular = hp;
                 }
-                AssertIntegerList(areaStages[areaId].BuffIds.Where(buffId => buffId > 0).Select(Convert.ToInt64).ToList(),
-                    response.FightData.EventIds.Take(areaStages[areaId].BuffIds.Count(buffId => buffId > 0)).Select(Convert.ToInt64).ToList(),
-                    $"{name} zone buffs from AreaStage");
+                // AscNet policy BossHpRatio 2 (checked at the baseline fluctuation, where levels are not clamped to 1):
+                // a boss has about twice the table HP of the regular enemy in the wave before it.
+                var baseline = new PreFightResponse.PreFightResponseFightData();
+                AssertEqual(true, ArenaStageDataset.TryHydrate(areaId, checked((uint)areaStages[areaId].StageId[0]), areaStages[areaId].MarkId, areaStages[areaId].Desc, baseline),
+                    $"{name} baseline hydrate");
+                JArray baselineWaves = JArray.FromObject(baseline.NpcGroupList!);
+                for (int wave = 4; wave <= baselineWaves.Count; wave += 4)
+                {
+                    double bossHp = WaveHp(baselineWaves[wave - 1]), regularHp = WaveHp(baselineWaves[wave - 2]);
+                    AssertEqual(true, bossHp >= regularHp * 1.9 && bossHp <= regularHp * 2.2, $"{name} wave {wave} boss HP {bossHp:0} is ~2x regular {regularHp:0}");
+                }
+                AssertEqual((long)areaStages[areaId].BuffIds.First(buffId => buffId > 0), Convert.ToInt64(response.FightData.EventIds[0]),
+                    $"{name} selected zone buff (ArenaSelectIndex 0) from AreaStage");
                 AssertEqual("5", JObject.FromObject(response.FightData.StageParams).Value<string>("MarkId"), $"{name} MarkId");
             }
 
@@ -164,9 +174,10 @@ namespace AscNet.Test
             // The zone's weather (last pre-fight event) must share the zone buff's element (ArenaAreaBuffDetails icon).
             Dictionary<int, string> weatherIcons = TableReaderV2.Parse<AscNet.Table.V2.client.fuben.arena.ArenaAreaBuffDetailsTable>()
                 .ToDictionary(row => row.Id, row => Path.GetFileNameWithoutExtension(row.Icon ?? string.Empty));
-            int iceWeather = Convert.ToInt32(PreFight(7, "War Zone Elite ice weather").FightData.EventIds.Last());
-            AssertEqual("IconAffixBingshuangUp", weatherIcons.GetValueOrDefault(iceWeather), $"Ice zone weather {iceWeather} is an Ice weather");
-            AssertEqual(weatherIcons.Where(pair => pair.Value == "IconAffixBingshuangUp").Max(pair => pair.Key), iceWeather,
+            int[] iceWeathers = PreFight(7, "War Zone Elite ice weather").FightData.EventIds.Skip(1).Select(Convert.ToInt32).ToArray();
+            AssertEqual(true, iceWeathers.Length > 0 && iceWeathers.All(id => weatherIcons.GetValueOrDefault(id) == "IconAffixBingshuangUp"),
+                $"Ice zone weathers [{string.Join(", ", iceWeathers)}] are Ice weathers");
+            AssertEqual(true, iceWeathers.Contains(weatherIcons.Where(pair => pair.Value == "IconAffixBingshuangUp").Max(pair => pair.Key)),
                 "Ice zone uses the newest Ice weather");
 
             _ = Run("warzone", "set", "fire");
@@ -202,6 +213,20 @@ namespace AscNet.Test
             AssertEqual(true, areaStages[glacioArea].Desc.StartsWith("Desperate Fight", StringComparison.Ordinal), "/warzone set glacio boss zone");
             _ = JoinAndReadAreas("War Zone Hero glacio");
             AssertBossPreFight(glacioArea, "War Zone Hero glacio boss pre-fight");
+            // Two-buff zone: ArenaSelectIndex selects the zone buff; the whole weather group (incl. the Glacio weather) applies.
+            int[] glacioBuffs = areaStages[glacioArea].BuffIds.Where(buffId => buffId > 0).ToArray();
+            if (glacioBuffs.Length > 1)
+            {
+                int[] glacioFirst = PreFight(glacioArea, "War Zone Hero glacio buff 1", 0).FightData.EventIds.Select(Convert.ToInt32).ToArray();
+                int[] glacioSecond = PreFight(glacioArea, "War Zone Hero glacio buff 2", 1).FightData.EventIds.Select(Convert.ToInt32).ToArray();
+                AssertEqual(glacioBuffs[0], glacioFirst[0], "glacio zone ArenaSelectIndex 0 sends only the first zone buff");
+                AssertEqual(false, glacioFirst.Contains(glacioBuffs[1]), "glacio zone ArenaSelectIndex 0 omits the second zone buff");
+                AssertEqual(glacioBuffs[1], glacioSecond[0], "glacio zone ArenaSelectIndex 1 sends the second zone buff");
+                AssertEqual(true, glacioFirst.Skip(1).SequenceEqual(glacioSecond.Skip(1)), "glacio zone weather group does not depend on the zone buff pick");
+                Dictionary<int, string> icons = TableReaderV2.Parse<AscNet.Table.V2.client.fuben.arena.ArenaAreaBuffDetailsTable>()
+                    .ToDictionary(row => row.Id, row => Path.GetFileNameWithoutExtension(row.Icon ?? string.Empty));
+                AssertEqual(true, glacioFirst.Skip(1).Any(id => icons.GetValueOrDefault(id) == "IconAffixFubingUp"), "glacio zone weather group includes a Glacio weather");
+            }
 
             _ = Run("warzone", "set", "ice");
             AssertEqual(7, player.SimulatedBattlefield.ArenaZoneOverrideAreaId, "Hero /warzone set ice prefers the regular Ice zone");

@@ -97,11 +97,16 @@ internal static partial class CharacterPower
     {
         Dictionary<int, int> result = new();
         if (session.player.Assign?.Chapters.Any(chapter => chapter.CharacterId > 0) != true
-            || !PowerCharacterSkills.TryGetValue((int)character.Id, out CharacterSkillTable? skills)
-            || !AttributeTables.Qualities.TryGetValue(((int)character.Id, character.Quality), out var quality)
-            || !AttributeTables.Npcs.TryGetValue(quality.NpcId, out var npc))
+            || !PowerCharacterSkills.TryGetValue((int)character.Id, out CharacterSkillTable? skills))
             return result;
-        int npcType = npc.Type;
+        // Client uses the quality Npc row's Type. Every CharacterQuality NpcId present in the share Npc table has
+        // Type == Character.Career, so Career stands in when the 4.9 Npc row is absent (e.g. Leia 1431003).
+        int npcType = AttributeTables.Qualities.TryGetValue(((int)character.Id, character.Quality), out var quality)
+            && AttributeTables.Npcs.TryGetValue(quality.NpcId, out var npc)
+                ? npc.Type
+                : PowerCharacters.GetValueOrDefault((int)character.Id)?.Career ?? 0;
+        if (npcType <= 0)
+            return result;
         foreach (var chapter in session.player.Assign.Chapters)
         {
             if (chapter.CharacterId <= 0 || !PowerAssignChapters.TryGetValue(chapter.ChapterId, out AssignChapterTable? chapterRow)

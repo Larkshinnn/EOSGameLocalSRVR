@@ -136,7 +136,9 @@ internal static class ArenaStageDataset
     // AscNet policy (user-requested 2026-11-06; retail wave levels are unavailable): keep each wave's enemy type but
     // re-level it so table HP (Attrib.Life + AttribPromoted.Life x (Level - 1)) rises with the wave number. Regular
     // enemies ramp linearly from the lowest to the highest regular template HP, bosses from the lowest to the highest
-    // boss template HP, over the whole run. Fluctuation still scales the resulting levels afterwards.
+    // boss template HP, over the whole run. With BossHpRatio > 0 (user-requested 2026-11-07: template bosses were too
+    // tanky) a boss instead targets BossHpRatio x the regular ramp HP of its wave. HpRampScale (user-requested
+    // 2026-11-07) then multiplies every target. Fluctuation still scales the resulting levels afterwards.
     private static List<List<JObject>> ApplyHpRamp(Generator generator, List<List<JObject>> waves)
     {
         HashSet<int> bossIds = generator.BossNpcIds.ToHashSet();
@@ -162,6 +164,9 @@ internal static class ArenaStageDataset
                 if (range is not { } bounds || !HpPerLevel.Value.TryGetValue(npcId, out (double Base, double PerLevel) life) || life.PerLevel <= 0)
                     return template;
                 double target = bounds.Min + (bounds.Max - bounds.Min) * fraction;
+                if (generator.BossHpRatio > 0 && bossIds.Contains(npcId) && regular is { } regularBounds)
+                    target = (regularBounds.Min + (regularBounds.Max - regularBounds.Min) * fraction) * generator.BossHpRatio;
+                target *= generator.HpRampScale;
                 JObject npc = (JObject)template.DeepClone();
                 npc["Level"] = Math.Max(1, (int)Math.Ceiling((target - life.Base) / life.PerLevel) + 1);
                 return npc;
@@ -323,6 +328,8 @@ internal static class ArenaStageDataset
                 || generator.WaveCount < generator.BossNpcIds.Count
                 || generator.MinimumBossWaveGap < 1
                 || generator.BossWaveInterval < 0
+                || generator.BossHpRatio < 0 || generator.BossHpRatio > 0 && !generator.HpRamp
+                || generator.HpRampScale <= 0 || generator.HpRampScale != 1 && !generator.HpRamp
                 || generator.BossWaveInterval > 0 && (generator.BossNpcIds.Count == 0 || generator.BossWaveInterval > generator.WaveCount)
                 || generator.BossNpcIds.Except(generator.UniqueOnceNpcIds).Any()
                 || generator.RepeatableNpcIds.Intersect(generator.UniqueOnceNpcIds).Any()
@@ -362,6 +369,10 @@ internal static class ArenaStageDataset
         public int BossWaveInterval { get; set; }
         // true: re-level each wave's enemy so table HP rises with the wave number (see ApplyHpRamp).
         public bool HpRamp { get; set; }
+        // > 0 with HpRamp: boss table HP = BossHpRatio x the regular ramp HP of the same wave (AscNet policy).
+        public double BossHpRatio { get; set; }
+        // With HpRamp: multiplies every ramp target (regular and boss) table HP (AscNet policy, user-requested 2026-11-07).
+        public double HpRampScale { get; set; } = 1;
     }
 
     private sealed class Stage
