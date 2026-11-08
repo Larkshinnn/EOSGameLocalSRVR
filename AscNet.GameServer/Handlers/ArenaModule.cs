@@ -7,6 +7,7 @@ using AscNet.Table.V2.share.fuben;
 using AscNet.Table.V2.share.fuben.arena;
 using MessagePack;
 using MongoDB.Driver;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace AscNet.GameServer.Handlers
@@ -115,6 +116,7 @@ namespace AscNet.GameServer.Handlers
     {
         private const string ConfigPath = "Configs/simulated_battlefield.json";
         private const int FightFramesPerSecond = 20;
+        private static readonly string[] StageParamRecordKeys = ["WaveCostTimes", "TimePointScore"];
         private static readonly Lazy<JObject> Config = new(() => JsonSnapshot.LoadObject(ConfigPath));
         private static readonly Lazy<List<ChallengeAreaTable>> Challenges = new(() => TableReaderV2.Parse<ChallengeAreaTable>());
         private static readonly Lazy<Dictionary<int, AreaStageTable>> AreaStages = new(() => TableReaderV2.Parse<AreaStageTable>().ToDictionary(x => x.Id));
@@ -272,12 +274,21 @@ namespace AscNet.GameServer.Handlers
             session.log.Info(
                 $"Warzone settle uid={session.player.PlayerData.Id} activity={state.ArenaActivityNo} fluctuation={state.ArenaFluctuationLevel} " +
                 $"area={areaId} stage={result.StageId} mark={areaStage.MarkId} damage={metrics["EnemyHp"]:0} kills={metrics["KillNum"]:0}/{metrics["TotalNum"]:0} " +
-                $"enemyPoint={enemyPoint} hpPoint={myHpPoint} timePoint={timePoint} npcPoint={npcPoint} total={point}");
+                $"enemyPoint={enemyPoint} hpPoint={myHpPoint} timePoint={timePoint} npcPoint={npcPoint} total={point} " +
+                $"fightTime={fightTime} leftTime={result.LeftTime} listRecords={JsonConvert.SerializeObject(result.StringToListIntRecord)}");
             int oldStage = state.ArenaStageMaxPoints.GetValueOrDefault(result.StageId);
             int oldArea = state.ArenaAreaMaxPoints.GetValueOrDefault(areaId);
             if (point > oldStage)
             {
                 state.ArenaStageMaxPoints[result.StageId] = point;
+                state.ArenaStageBestRecords ??= new();
+                Dictionary<string, List<int>> bestRecords = StageParamRecordKeys
+                    .Where(key => result.StringToListIntRecord?.GetValueOrDefault(key) is { Count: > 0 })
+                    .ToDictionary(key => key, key => result.StringToListIntRecord[key].ToList());
+                if (bestRecords.Count > 0)
+                    state.ArenaStageBestRecords[result.StageId] = bestRecords;
+                else
+                    state.ArenaStageBestRecords.Remove(result.StageId);
                 state.ArenaAreaMaxPoints[areaId] = point;
                 state.ArenaPoint = state.ArenaAreaMaxPoints.Values.Sum();
                 foreach (int type in activeAreas.SelectMany(activeAreaId => AreaStages.Value[activeAreaId].DistributeTypes).Distinct())
@@ -454,6 +465,11 @@ namespace AscNet.GameServer.Handlers
                 ?? new Dictionary<string, object?>();
             stageParams["DistributeMaxScore"] = distributionMaximum.ToString();
             stageParams["MarkId"] = area.MarkId.ToString();
+            // The capture's first run carries "[]" for both keys and the fight returns them as settle list records.
+            // AscNet policy (retail echo not captured): send the best-point run's lists back in the same "[a,b]" form.
+            if (state.ArenaStageBestRecords?.TryGetValue(request.StageId, out Dictionary<string, List<int>>? bestRecords) == true)
+                foreach ((string key, List<int> values) in bestRecords.Where(entry => StageParamRecordKeys.Contains(entry.Key)))
+                    stageParams[key] = "[" + string.Join(",", values) + "]";
             response.FightData.StageParams = stageParams;
             int waveCount = response.FightData.NpcGroupList?.Count ?? 0;
             session.log.Info(
@@ -964,6 +980,7 @@ namespace AscNet.GameServer.Handlers
         private static void ResetPoints(SimulatedBattlefieldState s)
         {
             s.ArenaPoint = 0; s.ArenaLastPointTime = 0; s.ArenaAreaMaxPoints.Clear(); s.ArenaStageMaxPoints.Clear(); s.ArenaDistributeMaxPoints.Clear();
+            s.ArenaStageBestRecords?.Clear();
         }
         private static JObject ActivityConfig => Config.Value["ArenaActivity"] as JObject ?? throw new InvalidDataException($"{ConfigPath}: ArenaActivity missing.");
         private static int CurrentActivity(long? now) => ActivityConfig.Value<int>("BaseActivityNo")

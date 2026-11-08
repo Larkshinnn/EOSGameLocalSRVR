@@ -78,6 +78,16 @@ def number_list_or_empty(row: dict[str, Any], field: str, source: Path) -> list[
     return number_list(row, field, source) if field in row else []
 
 
+def score_rate(row: dict[str, Any], source: Path) -> str | int:
+    # Client XBossSingleFeature.ScoreRate: score bonus in basis points (950 -> +9.5%); absent on most features.
+    value = row.get("ScoreRate")
+    if value is None:
+        return ""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value != int(value):
+        raise ValueError(f"{source}: ScoreRate must be an integer, got {value!r}")
+    return int(value) if value else ""
+
+
 def unique_index(rows: list[dict[str, Any]], field: str, source: Path) -> dict[int, dict[str, Any]]:
     result: dict[int, dict[str, Any]] = {}
     for row in rows:
@@ -218,9 +228,10 @@ def generate(source: Path) -> dict[str, bytes]:
     unique_index(features, "Id", feature_path)
     feature_width = max((len(number_list(r, "FightEventIds", feature_path)) for r in features), default=0)
     output["BossSingleChallengeFeature.tsv"] = table(
-        ["Id"] + repeated_columns("FightEventIds", feature_width) + ["Name", "Desc"],
+        ["Id"] + repeated_columns("FightEventIds", feature_width) + ["Name", "Desc", "ScoreRate"],
         ([integer(r, "Id", feature_path)] + padded(number_list(r, "FightEventIds", feature_path), feature_width)
-         + [text_field(r, "Name", feature_path), text_field(r, "Desc", feature_path)] for r in features))
+         + [text_field(r, "Name", feature_path), text_field(r, "Desc", feature_path), score_rate(r, feature_path)]
+         for r in features))
 
     buffs = sorted(data["BossSingleChallengeBuffGroup"], key=lambda r: integer(r, "Id", paths["BossSingleChallengeBuffGroup"]))
     buff_path = paths["BossSingleChallengeBuffGroup"]

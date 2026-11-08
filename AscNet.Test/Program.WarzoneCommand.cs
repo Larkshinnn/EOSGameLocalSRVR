@@ -31,7 +31,7 @@ namespace AscNet.Test
             // AscNet policy score override: Mark 5 damage expression comes from simulated_battlefield.json, others from Mark.tsv.
             MethodInfo markExpression = RequiredMethod(arenaModule, "MarkExpression", BindingFlags.Static | BindingFlags.NonPublic,
                 [typeof(int), typeof(string), typeof(string)]);
-            AssertEqual("EnemyHp/55*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage override");
+            AssertEqual("EnemyHp/50*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage override");
             AssertEqual("NpcGroup*50000*2", (string?)markExpression.Invoke(null, [5, "NpcGroupPoint", "NpcGroup*50000*2"]), "Mark 5 wave expression unchanged");
             AssertEqual("EnemyHp/100", (string?)markExpression.Invoke(null, [3, "EnemyHpPoint", "EnemyHp/100"]), "Mark 3 keeps table expression");
 

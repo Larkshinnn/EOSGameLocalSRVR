@@ -24430,6 +24430,7 @@ namespace AscNet.Test
                 StartFrame = 1, SettleFrame = 3825, PauseFrame = 1423, ExSkillPauseFrame = 1298,
                 LeftTime = 179, DeathTotalEnemy = 58, TotalDamage = 112_965_896,
                 StringToIntRecord = new Dictionary<string, int> { ["NpcGroup"] = 30 },
+                StringToListIntRecord = new Dictionary<string, List<int>> { ["WaveCostTimes"] = Enumerable.Range(1, 29).Select(wave => wave * 3).ToList() },
                 NpcHpInfo = new()
                 {
                     [1] = new NpcHp { Type = 1, AttrTable = new() { [1] = new Dictionary<object, object> { ["Value"] = 100, ["MaxValue"] = 100 } }, BuffIds = [] },
@@ -24521,6 +24522,20 @@ namespace AscNet.Test
             AssertEqual(0, scored.OldPoint, "War Zone captured OldPoint");
             AssertEqual(0, scored.OldArenaMaxPoint, "War Zone captured OldArenaMaxPoint");
             AssertEqual(3_779_317, scored.ArenaMaxPoint, "War Zone captured ArenaMaxPoint");
+            const int bestRecordPreFightPacketId = 81_095;
+            InvokeRegisteredRequestHandler(nameof(PreFightRequest), harness.Session, bestRecordPreFightPacketId, new PreFightRequest
+            {
+                PreFightData = new PreFightRequest.PreFightRequestPreFightData
+                {
+                    ChallengeCount = 1, StageId = checked((uint)selectedStageId), SelectAreaId = selectedAreaId,
+                    ArenaSelectIndex = arenaSelectIndex, CardIds = [], RobotIds = []
+                }
+            });
+            JObject bestRecordStageParams = JObject.FromObject(ReadResponsePayload<PreFightResponse>(
+                harness, bestRecordPreFightPacketId, nameof(PreFightResponse), "War Zone best-record PreFightResponse").FightData.StageParams);
+            AssertEqual("[" + string.Join(",", arenaSettle.StringToListIntRecord["WaveCostTimes"]) + "]",
+                bestRecordStageParams.Value<string>("WaveCostTimes"), "War Zone PreFight echoes the best run's WaveCostTimes");
+            AssertEqual("[]", bestRecordStageParams.Value<string>("TimePointScore"), "War Zone PreFight keeps unrecorded TimePointScore");
             foreach (CurrentConditionTable scoreCondition in arenaTaskConditions.Values.Where(condition => condition.Type is 28003 or 28006))
             {
                 AssertEqual(scored.Point, player.MissionProgress.ConditionCounters.GetValueOrDefault(scoreCondition.Id),

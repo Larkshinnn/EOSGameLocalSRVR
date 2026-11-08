@@ -707,6 +707,8 @@ namespace AscNet.GameServer.Handlers
             _ = TryGetChallengeBuffGroup(fight.PreFight.PreFightData.BossSingleChallengeBuffGroup,
                 session.player.SimulatedBattlefield, out pendingBuffGroup, out pendingFeatureIds, out pendingBuffChoices);
             int buffGroup = pendingBuffGroup;
+            if (stageType == 3)
+                bossResult.TotalScore = ApplyChallengeScoreRate(bossResult.TotalScore, pendingFeatureIds);
             session.log.Info(
                 $"PPC settle uid={session.player.PlayerData.Id} stage={stageId} stageType={stageType} win={settle.IsWin} " +
                 $"leftTime={settle.LeftTime} score={bossResult.TotalScore} npcHp=[" + string.Join("; ",
@@ -1288,6 +1290,15 @@ namespace AscNet.GameServer.Handlers
                 featureIds.Add(selectedFeatureId);
             }
             return true;
+        }
+
+        // Client shows the Intensive bonus as the plain sum of the selected features' ScoreRate in basis points
+        // (XUiFubenBossSingleSettlement:_RefreshTotalScoreRate; Web of Fate I 950 + Frostbite Incursion I 1550 = +25%),
+        // but reads the scored total from the server. AscNet policy: scale the capped total by that same sum, floored.
+        internal static int ApplyChallengeScoreRate(int totalScore, IEnumerable<int> featureIds)
+        {
+            long rate = featureIds.Sum(id => (long)(ChallengeFeatures.Value.GetValueOrDefault(id)?.ScoreRate ?? 0));
+            return rate <= 0 ? totalScore : checked((int)(totalScore * (10000L + rate) / 10000L));
         }
 
         private static void ApplyChallengeFeatureEvents(

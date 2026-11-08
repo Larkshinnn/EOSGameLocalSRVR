@@ -139,6 +139,12 @@ namespace AscNet.Common.Database
         [BsonDictionaryOptions(DictionaryRepresentation.ArrayOfDocuments)]
         public Dictionary<uint, int> ArenaStageMaxPoints { get; set; } = new();
 
+        // Fight-recorded per-wave lists (FightSettleResult.StringToListIntRecord WaveCostTimes/TimePointScore) of
+        // the stage's best-point run, echoed back through PreFight StageParams.
+        [BsonElement("arena_stage_best_records")]
+        [BsonDictionaryOptions(DictionaryRepresentation.ArrayOfDocuments)]
+        public Dictionary<uint, Dictionary<string, List<int>>> ArenaStageBestRecords { get; set; } = new();
+
         [BsonElement("arena_distribute_max_points")]
         [BsonDictionaryOptions(DictionaryRepresentation.ArrayOfDocuments)]
         public Dictionary<int, int> ArenaDistributeMaxPoints { get; set; } = new();

@@ -17,8 +17,27 @@ namespace AscNet.Test;
 
 internal partial class Program
 {
+        // Client settlement shows the Intensive bonus as the summed ScoreRate (basis points) of the selected features.
+        private static void ValidateBossSingleChallengeScoreRate()
+        {
+            Dictionary<int, BossSingleChallengeFeatureTable> features = TableReaderV2
+                .Parse<BossSingleChallengeFeatureTable>().ToDictionary(row => row.Id);
+            List<BossSingleChallengeFeatureTable> rated = features.Values.Where(row => row.ScoreRate > 0).ToList();
+            AssertEqual(true, rated.Count > 0, "Pain Cage feature table carries client ScoreRate");
+            BossSingleChallengeFeatureTable unrated = features.Values.First(row => (row.ScoreRate ?? 0) == 0);
+            AssertEqual(100_000, BossModule.ApplyChallengeScoreRate(100_000, [unrated.Id]),
+                "Pain Cage feature without ScoreRate leaves the total unchanged");
+            BossSingleChallengeFeatureTable first = rated[0];
+            BossSingleChallengeFeatureTable second = rated.First(row => row.Id != first.Id);
+            int rate = first.ScoreRate!.Value + second.ScoreRate!.Value;
+            AssertEqual(checked((int)(123_457L * (10000 + rate) / 10000)),
+                BossModule.ApplyChallengeScoreRate(123_457, [unrated.Id, first.Id, second.Id]),
+                "Pain Cage selected feature ScoreRates add up and scale the total");
+        }
+
         private static void ValidateBossSingleCompatibility()
         {
+            ValidateBossSingleChallengeScoreRate();
             using MongoCollectionOverride mongoOverride = MongoCollectionOverride.InstallForBossCompatibility(
                 out RecordingMongoCollectionProxy<AscNet.Common.Database.Player> playerCollection,
                 out RecordingMongoCollectionProxy<AscNet.Common.Database.Stage> stageCollection);
@@ -657,7 +676,12 @@ internal partial class Program
                 && clientShapedPreFight.FightData.EventIds.Contains(choiceFeatureEvent),
                 "Pain Cage client-shaped module applies base and selected table-derived events");
             player.SimulatedBattlefield.BossChallengeHistory.RemoveAll(row => row.StageId == challengeStageId);
-            _ = SettleFight(82_034, clientShapedPreFight, intensiveStage, 100, 0, fightSeconds: 8);
+            FightSettleResponse choiceSettle = SettleFight(82_034, clientShapedPreFight, intensiveStage, 100, 0, fightSeconds: 8);
+            int choiceScoreRate = TableReaderV2.Parse<BossSingleChallengeFeatureTable>()
+                .Single(row => row.Id == challengeBuffChoice.Buff[0]).ScoreRate ?? 0;
+            AssertEqual(checked((int)((long)intensiveResult.TotalScore * (10000 + choiceScoreRate) / 10000)),
+                RequiredBossResult(choiceSettle, "Pain Cage intensive choice result").TotalScore,
+                "Pain Cage intensive total includes the selected feature ScoreRate");
             _ = SaveScore(82_035, challengeStageId, "Pain Cage client-shaped intensive save", out _);
             dynamic persistedChoiceHistory = BuildLogin(player, null).FubenBossSingleData
                 .ChallengeStageHistoryList.Single(row => row.StageId == challengeStageId).BuffGroup
