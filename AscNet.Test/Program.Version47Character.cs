@@ -2,6 +2,7 @@ using System.Reflection;
 using AscNet.Common.Database;
 using AscNet.Common.MsgPack;
 using AscNet.GameServer;
+using AscNet.GameServer.Commands;
 using AscNet.GameServer.Handlers;
 using AscNet.Common.Util;
 using AscNet.Table.V2.share.character;
@@ -41,6 +42,62 @@ internal partial class Program
         ValidateVersion47ObserverPreFightCompatibility();
         ValidateVersion47QualityGatedSkillReconciliation();
         ValidateRankSyncKeepsLeveledClassSkills();
+        ValidateRankDownAndStarSkillSync();
+    }
+
+    // Leia 1431003: 143325 unlocks at SS3 (62006) and 143326 at SSS3 (62008).
+    private static void ValidateRankDownAndStarSkillSync()
+    {
+        using MongoCollectionOverride mongoOverride = MongoCollectionOverride.InstallForShopCompatibility();
+        CommandFactory.commands.Clear();
+        CommandFactory.LoadCommands();
+        const long playerId = 99_431;
+        const uint leia = 1_431_003;
+        AscNet.Common.Database.Character roster = CreateTestCharacterRoster((int)leia, 80);
+        CharacterData character = RequiredCharacterData(roster, (int)leia);
+        character.Quality = 6;
+        character.Star = 0;
+        character.SkillList.RemoveAll(skill => skill.Id is 143324 or 143325 or 143326);
+        character.SkillList.AddRange([
+            new CharacterSkill { Id = 143324, Level = 2 },
+            new CharacterSkill { Id = 143325, Level = 2 },
+            new CharacterSkill { Id = 143326, Level = 3 }]);
+        int fragmentId = TableReaderV2.Parse<CharacterTable>().Single(row => row.Id == (int)leia).ItemId;
+        using LoopbackSessionHarness harness = new(roster, CreateDrawCompatibilityPlayer(playerId),
+            CreateDrawCompatibilityInventory(playerId, [new Item { Id = fragmentId, Count = 1000 }]), "rank-down-skill-test");
+
+        Dictionary<uint, int> Levels(CharacterData data) => data.SkillList
+            .Where(skill => skill.Id is 143325 or 143326).ToDictionary(skill => skill.Id, skill => skill.Level);
+        CharacterData ReadCharacterPush(string name)
+        {
+            Packet.Push push = MessagePackSerializer.Deserialize<Packet.Push>(harness.ReadPacket(name).Content);
+            AssertEqual(nameof(NotifyCharacterDataList), push.Name, name);
+            return MessagePackSerializer.Deserialize<NotifyCharacterDataList>(push.Content).CharacterDataList.Single();
+        }
+
+        Command command = CommandFactory.CreateCommand("character", harness.Session, ["rank", leia.ToString(), "SS"])
+            ?? throw new InvalidDataException("/character is not registered.");
+        try { command.Execute(); } catch (CommandMessageCallbackException) { }
+        Dictionary<uint, int> cleared = Levels(ReadCharacterPush("rank-down clearing push"));
+        AssertEqual(0, cleared[143325], "rank-down push locks the SS3 skill on the client");
+        AssertEqual(0, cleared[143326], "rank-down push locks the SSS3 skill on the client");
+        AssertEqual(0, Levels(ReadCharacterPush("rank-down final push")).Count, "final rank-down push has only the real skills");
+        AssertEqual(0, Levels(character).Count, "rank-down Level 0 rows are not kept on the server");
+
+        void ActivateStar(int packetId, int expectedStar)
+        {
+            InvokeRegisteredRequestHandler("CharacterActivateStarRequest", harness.Session, packetId,
+                new CharacterActivateStarRequest { TemplateId = (int)leia });
+            _ = ReadResponsePayload<CharacterActivateStarResponse>(harness, packetId, nameof(CharacterActivateStarResponse),
+                $"star {expectedStar}", maxPacketsToRead: 16);
+            AssertEqual(expectedStar, character.Star, $"Leia reaches SS{expectedStar}");
+        }
+        ActivateStar(93_001, 1);
+        ActivateStar(93_002, 2);
+        AssertEqual(0, Levels(character).Count, "SS3 skill stays locked below SS3");
+        ActivateStar(93_003, 3);
+        AssertEqual(1, Levels(character)[143325], "star activation unlocks the SS3 skill at SS3");
+        AssertEqual(false, Levels(character).ContainsKey(143326), "SSS3 skill stays locked at SS3");
     }
 
     // Regular leveled skills (no Level 0 unlock row) whose upgrade rows require a rank, e.g. the xx23 class skills,

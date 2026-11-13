@@ -741,6 +741,7 @@ namespace AscNet.GameServer.Handlers
                         session.SendPush(notifyItemData);
                     }
                     character.Star++;
+                    session.character.UnlockQualityGatedSkills(character, session.player.GatherRewards);
                 }
                 else
                 {

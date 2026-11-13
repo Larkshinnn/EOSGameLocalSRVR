@@ -31,8 +31,9 @@ namespace AscNet.Test
             // AscNet policy score override: Mark 5 damage expression comes from simulated_battlefield.json, others from Mark.tsv.
             MethodInfo markExpression = RequiredMethod(arenaModule, "MarkExpression", BindingFlags.Static | BindingFlags.NonPublic,
                 [typeof(int), typeof(string), typeof(string)]);
-            AssertEqual("EnemyHp/50*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage override");
-            AssertEqual("NpcGroup*50000*2", (string?)markExpression.Invoke(null, [5, "NpcGroupPoint", "NpcGroup*50000*2"]), "Mark 5 wave expression unchanged");
+            AssertEqual("EnemyHp/25*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage keeps table expression");
+            AssertEqual("NpcGroup*50000", (string?)markExpression.Invoke(null, [5, "NpcGroupPoint", "NpcGroup*50000*2"]), "Mark 5 wave override");
+            AssertEqual("Hp*200", (string?)markExpression.Invoke(null, [5, "MyHpPoint", "Hp*200*2"]), "Mark 5 HP override");
             AssertEqual("EnemyHp/100", (string?)markExpression.Invoke(null, [3, "EnemyHpPoint", "EnemyHp/100"]), "Mark 3 keeps table expression");
 
             // Automatic weekly selection must never pick a command-only (MarkId 5 boss generator) zone.

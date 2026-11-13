@@ -168,10 +168,24 @@ namespace AscNet.GameServer.Commands
             if (star < 0 || star > 9)
                 throw new CommandMessageCallbackException("Evolution stars must be between 0 and 9.");
 
+            List<CharacterSkill> skillsBeforeSync = character.SkillList.ToList();
             character.Quality = quality;
             character.Star = star;
             session.character.UnlockQualityGatedSkills(character, session.player.GatherRewards, synchronizeToRank: true);
             session.character.SaveChecked();
+            // Client XCharacter:UpdateSkillData merges by skill group and never clears a group missing from the list,
+            // so a rank-down must first state each removed skill at Level 0 (locked). The follow-up push restores the
+            // real list on the client; the Level 0 rows are never persisted.
+            List<CharacterSkill> removedSkills = skillsBeforeSync
+                .Where(before => character.SkillList.All(after => after.Id != before.Id))
+                .Select(before => new CharacterSkill { Id = before.Id, Level = 0 })
+                .ToList();
+            if (removedSkills.Count > 0)
+            {
+                character.SkillList.AddRange(removedSkills);
+                session.SendPush(new NotifyCharacterDataList { CharacterDataList = { character } });
+                character.SkillList.RemoveAll(removedSkills.Contains);
+            }
             session.SendPush(new NotifyCharacterDataList { CharacterDataList = { character } });
             string rank = quality switch { 1 => "B", 2 => "A", 3 => "S", 4 => "SS", 5 => "SSS", 6 => "SSS+", _ => $"quality {quality}" };
             string evolution = star > 0 ? $"{rank}{star}" : rank;

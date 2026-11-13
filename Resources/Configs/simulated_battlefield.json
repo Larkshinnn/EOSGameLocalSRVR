@@ -32,7 +32,7 @@
     ]
   },
   "ArenaMarkOverrides": {
-    "Policy": "AscNet policy (user-requested 2026-11-06), not retail data: replaces individual Mark.tsv score expressions for the listed MarkId. Mark 5 damage weight is lowered from EnemyHp/25*2 so a 45-wave, ~284M-damage clear scores about 17M instead of 27M; lowered again to EnemyHp/55*2 on 2026-11-07 after HpRampScale raised enemy HP. Raised slightly to EnemyHp/50*2 (+10% damage points) on 2026-11-08. Remove an entry to restore the table expression.",
-    "Marks": { "5": { "EnemyHpPoint": "EnemyHp/50*2" } }
+    "Policy": "AscNet policy (user-requested 2026-11-09), not recovered retail server behavior: replaces individual Mark.tsv score expressions for the listed MarkId. Mark 5 wave and HP points follow the values the user read from Desperate Fight settlement screens (50000 per wave, 200 per HP percent) instead of the doubled table expressions. The damage expression stays the Mark.tsv value; earlier local damage overrides were removed. Remove an entry to restore the table expression.",
+    "Marks": { "5": { "MyHpPoint": "Hp*200", "NpcGroupPoint": "NpcGroup*50000" } }
   }
 }
