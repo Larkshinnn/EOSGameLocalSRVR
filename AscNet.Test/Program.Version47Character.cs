@@ -43,6 +43,60 @@ internal partial class Program
         ValidateVersion47QualityGatedSkillReconciliation();
         ValidateRankSyncKeepsLeveledClassSkills();
         ValidateRankDownAndStarSkillSync();
+        ValidateRankAllCommand();
+    }
+
+    // /character rank all: every owned character in one save and one push (plus one clearing push on a rank-down).
+    private static void ValidateRankAllCommand()
+    {
+        using MongoCollectionOverride mongoOverride = MongoCollectionOverride.InstallForShopCompatibility();
+        CommandFactory.commands.Clear();
+        CommandFactory.LoadCommands();
+        const long playerId = 99_432;
+        const uint leia = 1_431_003;
+        const uint lucia = 1_021_001;
+        AscNet.Common.Database.Character roster = CreateTestCharacterRoster((int)leia, 80);
+        roster.AddCharacter(lucia, 80);
+        CharacterData leiaData = RequiredCharacterData(roster, (int)leia);
+        CharacterData luciaData = RequiredCharacterData(roster, (int)lucia);
+        using LoopbackSessionHarness harness = new(roster, CreateDrawCompatibilityPlayer(playerId),
+            CreateDrawCompatibilityInventory(playerId, []), "rank-all-test");
+
+        string Run(params string[] args)
+        {
+            Command command = CommandFactory.CreateCommand("character", harness.Session, args)
+                ?? throw new InvalidDataException("/character is not registered.");
+            try { command.Execute(); return string.Empty; }
+            catch (CommandMessageCallbackException message) { return message.Message; }
+        }
+        List<CharacterData> ReadCharacterPush(string name)
+        {
+            Packet.Push push = MessagePackSerializer.Deserialize<Packet.Push>(harness.ReadPacket(name).Content);
+            AssertEqual(nameof(NotifyCharacterDataList), push.Name, name);
+            return MessagePackSerializer.Deserialize<NotifyCharacterDataList>(push.Content).CharacterDataList;
+        }
+
+        AssertEqual("2 characters set to SSS+.", Run("rank", "all", "SSS+"), "rank all SSS+ message");
+        List<CharacterData> upPush = ReadCharacterPush("rank all SSS+ push");
+        AssertEqual(2, upPush.Count, "rank all SSS+ pushes both characters at once");
+        AssertEqual(true, upPush.All(data => data.Quality == 6 && data.Star == 0), "rank all SSS+ push carries SSS+");
+        AssertEqual(true, leiaData.Quality == 6 && luciaData.Quality == 6, "rank all SSS+ updates the server roster");
+        AssertEqual(true, leiaData.SkillList.Any(skill => skill.Id == 143326), "rank all SSS+ unlocks Leia's SSS3 skill");
+
+        AssertEqual("2 characters set to SS2.", Run("rank", "all", "SS", "2"), "rank all SS 2 message");
+        List<CharacterData> clearingPush = ReadCharacterPush("rank all SS clearing push");
+        CharacterData leiaCleared = clearingPush.Single(data => data.Id == leia);
+        AssertEqual(0, leiaCleared.SkillList.Single(skill => skill.Id == 143326).Level, "rank all SS clearing push locks Leia's SSS3 skill");
+        List<CharacterData> finalPush = ReadCharacterPush("rank all SS final push");
+        AssertEqual(2, finalPush.Count, "rank all SS final push has both characters");
+        AssertEqual(true, finalPush.All(data => data.Quality == 4 && data.Star == 2), "rank all SS 2 push carries SS2");
+        AssertEqual(false, leiaData.SkillList.Any(skill => skill.Id is 143325 or 143326),
+            "rank all SS2 keeps neither Leia's SS3/SSS3 skills nor their Level 0 rows on the server");
+
+        leiaData.Star = 1;
+        AssertEqual("2 characters set to SS (evolution stars kept).", Run("rank", "all", "SS"), "rank all SS with mixed stars");
+        AssertEqual(1, leiaData.Star, "rank all SS keeps Leia's star");
+        AssertEqual(2, luciaData.Star, "rank all SS keeps Lucia's star");
     }
 
     // Leia 1431003: 143325 unlocks at SS3 (62006) and 143326 at SSS3 (62008).

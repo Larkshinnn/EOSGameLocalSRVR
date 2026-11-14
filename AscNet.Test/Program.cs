@@ -80,6 +80,9 @@ namespace AscNet.Test
             try
             {
                 UseResourceWorkingDirectory();
+                // Score expectations must not depend on the developer's local /warzone dmg settings.
+                AscNet.GameServer.Handlers.ArenaLocalScoreSettings.PathOverride =
+                    Path.Combine(Path.GetTempPath(), $"ascnet-test-{Environment.ProcessId}-none.local.json");
                 if (args.Contains("--cn-sdk-config-only"))
                 {
                     ValidateKuroSdkCompatibilityEndpoints().GetAwaiter().GetResult();

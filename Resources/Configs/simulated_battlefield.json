@@ -32,7 +32,7 @@
     ]
   },
   "ArenaMarkOverrides": {
-    "Policy": "AscNet policy (user-requested 2026-11-09), not recovered retail server behavior: replaces individual Mark.tsv score expressions for the listed MarkId. Mark 5 wave and HP points follow the values the user read from Desperate Fight settlement screens (50000 per wave, 200 per HP percent) instead of the doubled table expressions. The damage expression stays the Mark.tsv value; earlier local damage overrides were removed. Remove an entry to restore the table expression.",
-    "Marks": { "5": { "MyHpPoint": "Hp*200", "NpcGroupPoint": "NpcGroup*50000" } }
+    "Policy": "AscNet policy (user-requested 2026-11-09), not recovered retail server behavior: replaces individual Mark.tsv score expressions for the listed MarkId. Mark 5 wave and HP points follow the values the user read from Desperate Fight settlement screens (50000 per wave, 200 per HP percent) instead of the doubled table expressions. Mark 5 damage uses EnemyHp/45*2 instead of the table EnemyHp/25*2 (user-requested 2026-11-14). Per-install tuning on top of this is /warzone dmg (Resources/Configs/simulated_battlefield.local.json, gitignored). Remove an entry to restore the table expression.",
+    "Marks": { "5": { "EnemyHpPoint": "EnemyHp/45*2", "MyHpPoint": "Hp*200", "NpcGroupPoint": "NpcGroup*50000" } }
   }
 }

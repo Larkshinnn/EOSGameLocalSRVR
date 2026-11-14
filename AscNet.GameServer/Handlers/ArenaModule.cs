@@ -955,9 +955,21 @@ namespace AscNet.GameServer.Handlers
             return 0;
         }
 
+        // Effective score expression: the repository expression, then the local /warzone dmg percent on the damage part.
+        // The percent is appended as integer "*P/100": Evaluate runs strictly left to right (so it scales the whole
+        // expression) and parses numbers with the current culture, so decimals like 1.2 are avoided.
+        private static string? MarkExpression(int markId, string field, string? tableExpression)
+        {
+            string? expression = RepositoryMarkExpression(markId, field, tableExpression);
+            if (field == "EnemyHpPoint" && !string.IsNullOrWhiteSpace(expression)
+                && ArenaLocalScoreSettings.DamagePercent(markId) is int percent && percent != 100)
+                return $"{expression}*{percent}/100";
+            return expression;
+        }
+
         // AscNet policy (user-requested): simulated_battlefield.json ArenaMarkOverrides.Marks[MarkId][field] replaces a
         // Mark.tsv score expression; without an entry the authoritative table expression is used.
-        private static string? MarkExpression(int markId, string field, string? tableExpression) =>
+        private static string? RepositoryMarkExpression(int markId, string field, string? tableExpression) =>
             Config.Value["ArenaMarkOverrides"]?["Marks"]?[markId.ToString(System.Globalization.CultureInfo.InvariantCulture)]?[field]?.Value<string>()
                 is { Length: > 0 } overridden ? overridden : tableExpression;
 

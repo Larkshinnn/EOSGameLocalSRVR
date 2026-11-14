@@ -13,12 +13,12 @@ namespace AscNet.GameServer.Commands
     {
         public CharacterCommand(Session session, string[] args, bool validate = true) : base(session, args, validate) { }
 
-        public override string Help => "Use /character add <frame name|id|all>, /character rank <frame name|id> <B|A|S|SS|SSS|SSS3|SSS6|SSS+|quality> [star 0-9], or /character find <name>. Frame names may contain spaces, e.g. /character rank lucia pyroath SSS+ or /character rank pyroath SS 2.";
+        public override string Help => "Use /character add <frame name|id|all>, /character rank <frame name|id|all> <B|A|S|SS|SSS|SSS3|SSS6|SSS+|quality> [star 0-9], or /character find <name>. Frame names may contain spaces, e.g. /character rank lucia pyroath SSS+, /character rank pyroath SS 2, or /character rank all SSS+.";
 
         [Argument(0, @"^add$|^rank$|^find$", "The operation selected (add, rank, find)", ArgumentFlags.IgnoreCase)]
         string Op { get; set; } = string.Empty;
 
-        [Argument(1, @"^\S+$", "The target character: frame name (e.g. Pyroath, Lucia Pyroath, Lucia: Pyroath), character id, or 'all' for add")]
+        [Argument(1, @"^\S+$", "The target character: frame name (e.g. Pyroath, Lucia Pyroath, Lucia: Pyroath), character id, or 'all' for add/rank")]
         string Target { get; set; } = string.Empty;
 
         private static readonly Regex RankToken = new(@"^([0-6]|B|A|S|SS|SSS|SSS3|SSS6|SSS\+)$", RegexOptions.IgnoreCase);
@@ -112,7 +112,7 @@ namespace AscNet.GameServer.Commands
 
         private void SetRank()
         {
-            const string usage = "Usage: /character rank <frame name|id> <B|A|S|SS|SSS|SSS3|SSS6|SSS+|quality> [star 0-9]";
+            const string usage = "Usage: /character rank <frame name|id|all> <B|A|S|SS|SSS|SSS3|SSS6|SSS+|quality> [star 0-9]";
             string[] tokens = args[1..];
             if (tokens.Length < 2)
                 throw new CommandMessageCallbackException(usage);
@@ -134,12 +134,6 @@ namespace AscNet.GameServer.Commands
             else
                 throw new CommandMessageCallbackException(usage);
 
-            CharacterTable table = ResolveCharacter(tokens[..nameLength], ownedOnly: true);
-            int characterId = table.Id;
-            CharacterData? character = session.character.Characters.FirstOrDefault(candidate => candidate.Id == (uint)characterId);
-            if (character is null)
-                throw new CommandMessageCallbackException($"{table.LogName} (ID {characterId}) is not on this account. Use /character add {table.TradeName} first.");
-
             string selectedRank = rankText.ToUpperInvariant();
             int quality = selectedRank switch
             {
@@ -151,45 +145,120 @@ namespace AscNet.GameServer.Commands
                 "SSS+" => 6,
                 _ => Miscs.ParseIntOr(rankText)
             };
+            int? explicitStar = string.IsNullOrWhiteSpace(starText) ? null : Miscs.ParseIntOr(starText);
+
+            if (nameLength == 1 && tokens[0].Equals("all", StringComparison.OrdinalIgnoreCase))
+            {
+                SetRankAll(selectedRank, quality, explicitStar);
+                return;
+            }
+
+            CharacterTable table = ResolveCharacter(tokens[..nameLength], ownedOnly: true);
+            int characterId = table.Id;
+            CharacterData? character = session.character.Characters.FirstOrDefault(candidate => candidate.Id == (uint)characterId);
+            if (character is null)
+                throw new CommandMessageCallbackException($"{table.LogName} (ID {characterId}) is not on this account. Use /character add {table.TradeName} first.");
+
             bool supportedQuality = TableReaderV2.Parse<CharacterQualityTable>()
                 .Any(row => row.CharacterId == characterId && row.Quality == quality);
             if (!supportedQuality)
                 throw new CommandMessageCallbackException($"Quality {quality} is not available for {table.LogName} (ID {characterId}).");
 
-            int star = string.IsNullOrWhiteSpace(starText) ? selectedRank switch
+            int star = ResolveStar(selectedRank, explicitStar, quality, character.Star);
+            List<CharacterSkill> removedSkills = ApplyRank(character, quality, star);
+            session.character.SaveChecked();
+            PushRankChanges([(character, removedSkills)]);
+            throw new CommandMessageCallbackException($"{table.LogName} (ID {characterId}) set to {Evolution(quality, star)}.");
+        }
+
+        // Every owned character that supports the requested quality; the others are skipped and counted.
+        private void SetRankAll(string selectedRank, int quality, int? explicitStar)
+        {
+            HashSet<int> supported = TableReaderV2.Parse<CharacterQualityTable>()
+                .Where(row => row.Quality == quality)
+                .Select(row => row.CharacterId)
+                .ToHashSet();
+            List<(CharacterData Character, List<CharacterSkill> RemovedSkills)> changes = [];
+            HashSet<int> stars = [];
+            int skipped = 0;
+            foreach (CharacterData character in session.character.Characters)
+            {
+                if (!supported.Contains((int)character.Id))
+                {
+                    skipped++;
+                    continue;
+                }
+                int star = ResolveStar(selectedRank, explicitStar, quality, character.Star);
+                stars.Add(star);
+                changes.Add((character, ApplyRank(character, quality, star)));
+            }
+            if (changes.Count == 0)
+                throw new CommandMessageCallbackException($"No owned character supports {RankName(quality)}.");
+
+            session.character.SaveChecked();
+            PushRankChanges(changes);
+            string evolution = stars.Count == 1 ? Evolution(quality, stars.Single()) : $"{RankName(quality)} (evolution stars kept)";
+            throw new CommandMessageCallbackException($"{changes.Count} characters set to {evolution}"
+                + (skipped > 0 ? $"; {skipped} skipped because {RankName(quality)} is not available for them." : "."));
+        }
+
+        private static int ResolveStar(string selectedRank, int? explicitStar, int quality, int currentStar)
+        {
+            int star = explicitStar ?? selectedRank switch
             {
                 "SSS" or "SSS3" => 3,
                 "SSS6" => 6,
                 "SSS+" => 0,
-                _ => character.Star
-            } : Miscs.ParseIntOr(starText);
+                _ => currentStar
+            };
             if (quality == 6)
                 star = 0;
             if (star < 0 || star > 9)
                 throw new CommandMessageCallbackException("Evolution stars must be between 0 and 9.");
+            return star;
+        }
 
+        // Sets quality/star and re-syncs rank-gated skills; returns the skills the change removed as Level 0 rows.
+        private List<CharacterSkill> ApplyRank(CharacterData character, int quality, int star)
+        {
             List<CharacterSkill> skillsBeforeSync = character.SkillList.ToList();
             character.Quality = quality;
             character.Star = star;
             session.character.UnlockQualityGatedSkills(character, session.player.GatherRewards, synchronizeToRank: true);
-            session.character.SaveChecked();
-            // Client XCharacter:UpdateSkillData merges by skill group and never clears a group missing from the list,
-            // so a rank-down must first state each removed skill at Level 0 (locked). The follow-up push restores the
-            // real list on the client; the Level 0 rows are never persisted.
-            List<CharacterSkill> removedSkills = skillsBeforeSync
+            return skillsBeforeSync
                 .Where(before => character.SkillList.All(after => after.Id != before.Id))
                 .Select(before => new CharacterSkill { Id = before.Id, Level = 0 })
                 .ToList();
-            if (removedSkills.Count > 0)
-            {
-                character.SkillList.AddRange(removedSkills);
-                session.SendPush(new NotifyCharacterDataList { CharacterDataList = { character } });
-                character.SkillList.RemoveAll(removedSkills.Contains);
-            }
-            session.SendPush(new NotifyCharacterDataList { CharacterDataList = { character } });
-            string rank = quality switch { 1 => "B", 2 => "A", 3 => "S", 4 => "SS", 5 => "SSS", 6 => "SSS+", _ => $"quality {quality}" };
-            string evolution = star > 0 ? $"{rank}{star}" : rank;
-            throw new CommandMessageCallbackException($"{table.LogName} (ID {characterId}) set to {evolution}.");
         }
+
+        // Client XCharacter:UpdateSkillData merges by skill group and never clears a group missing from the list,
+        // so a rank-down must first state each removed skill at Level 0 (locked). The follow-up push restores the
+        // real list on the client; the Level 0 rows are never persisted (call after SaveChecked).
+        private void PushRankChanges(IReadOnlyList<(CharacterData Character, List<CharacterSkill> RemovedSkills)> changes)
+        {
+            List<(CharacterData Character, List<CharacterSkill> RemovedSkills)> clearing = changes
+                .Where(change => change.RemovedSkills.Count > 0)
+                .ToList();
+            if (clearing.Count > 0)
+            {
+                foreach ((CharacterData character, List<CharacterSkill> removed) in clearing)
+                    character.SkillList.AddRange(removed);
+                try
+                {
+                    session.SendPush(new NotifyCharacterDataList { CharacterDataList = clearing.Select(change => change.Character).ToList() });
+                }
+                finally
+                {
+                    foreach ((CharacterData character, List<CharacterSkill> removed) in clearing)
+                        character.SkillList.RemoveAll(removed.Contains);
+                }
+            }
+            session.SendPush(new NotifyCharacterDataList { CharacterDataList = changes.Select(change => change.Character).ToList() });
+        }
+
+        private static string RankName(int quality) =>
+            quality switch { 1 => "B", 2 => "A", 3 => "S", 4 => "SS", 5 => "SSS", 6 => "SSS+", _ => $"quality {quality}" };
+
+        private static string Evolution(int quality, int star) => star > 0 ? $"{RankName(quality)}{star}" : RankName(quality);
     }
 }

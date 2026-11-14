@@ -8,12 +8,13 @@ namespace AscNet.GameServer.Commands
         public WarzoneCommand(Session session, string[] args, bool validate = true) : base(session, args, validate) { }
 
         public override string Help => "Use /warzone reset, /warzone tiers, /warzone tier <Id|name>, /warzone zones [element|zone name] [boss|duo|mob], "
-            + "/warzone set <element|zone name|AreaId> [boss|duo|mob] (e.g. /warzone set ice, /warzone set plasma duo), /warzone zone <AreaId|auto>, or /warzone fluctuation <level>.";
+            + "/warzone set <element|zone name|AreaId> [boss|duo|mob] (e.g. /warzone set ice, /warzone set plasma duo), /warzone zone <AreaId|auto>, /warzone fluctuation <level>, "
+            + "or /warzone dmg [percent|reset] [boss|duo|mob] (local damage-score tuning, 100 = default; e.g. /warzone dmg 120 boss).";
 
-        [Argument(0, @"^[A-Za-z]+$|^[0-9]+$", "Tier ID/name or 'reset', 'tiers', 'tier', 'zones', 'set', 'zone', or 'fluctuation' action", ArgumentFlags.IgnoreCase)]
+        [Argument(0, @"^[A-Za-z]+$|^[0-9]+$", "Tier ID/name or 'reset', 'tiers', 'tier', 'zones', 'set', 'zone', 'fluctuation', or 'dmg' action", ArgumentFlags.IgnoreCase)]
         protected string Operation { get; set; } = string.Empty;
 
-        [Argument(1, @"^[A-Za-z0-9_\-]+$", "Tier ID/name, element or zone name, AreaId, fluctuation level, or 'auto'", ArgumentFlags.Optional | ArgumentFlags.IgnoreCase)]
+        [Argument(1, @"^[A-Za-z0-9_\-]+%?$", "Tier ID/name, element or zone name, AreaId, fluctuation level, damage percent, or 'auto'", ArgumentFlags.Optional | ArgumentFlags.IgnoreCase)]
         protected string Value { get; set; } = string.Empty;
 
         [Argument(2, @"^[A-Za-z0-9_\-]+$", "For set/zones: encounter type (boss|duo|mob) or the next word of a zone name", ArgumentFlags.Optional | ArgumentFlags.IgnoreCase)]
@@ -26,6 +27,9 @@ namespace AscNet.GameServer.Commands
         {
             if (Operation.Equals("set", StringComparison.OrdinalIgnoreCase))
                 throw new CommandMessageCallbackException(ArenaModule.SetZoneByQueryFromCommand(session, Terms));
+
+            if (Operation.Equals("dmg", StringComparison.OrdinalIgnoreCase))
+                throw new CommandMessageCallbackException(ArenaModule.DamageScoreFromCommand(Terms));
 
             if (Operation.Equals("zones", StringComparison.OrdinalIgnoreCase))
                 throw new CommandMessageCallbackException(ArenaModule.ListZonesForCommand(session, Terms));

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using AscNet.Common.MsgPack;
 using AscNet.Common.Util;
 using AscNet.GameServer;
@@ -18,6 +18,9 @@ namespace AscNet.Test
             using MongoCollectionOverride mongoOverride = MongoCollectionOverride.InstallForShopCompatibility();
             CommandFactory.commands.Clear();
             CommandFactory.LoadCommands();
+            // Never read or write the developer's real Resources/Configs/simulated_battlefield.local.json.
+            ArenaLocalScoreSettings.PathOverride = Path.Combine(Path.GetTempPath(), $"ascnet-warzone-dmg-{Environment.ProcessId}.local.json");
+            File.Delete(ArenaLocalScoreSettings.PathOverride);
 
             const long playerId = 99_402;
             Dictionary<int, AreaStageTable> areaStages = TableReaderV2.Parse<AreaStageTable>().ToDictionary(row => row.Id);
@@ -28,10 +31,10 @@ namespace AscNet.Test
             MethodInfo selectArenaAreas = RequiredMethod(arenaModule, "SelectedAreas", BindingFlags.Static | BindingFlags.NonPublic,
                 [typeof(int), typeof(long), typeof(ChallengeAreaTable), typeof(int)]);
 
-            // AscNet policy score override: Mark 5 damage expression comes from simulated_battlefield.json, others from Mark.tsv.
+            // AscNet policy score override: Mark 5 expressions come from simulated_battlefield.json, others from Mark.tsv.
             MethodInfo markExpression = RequiredMethod(arenaModule, "MarkExpression", BindingFlags.Static | BindingFlags.NonPublic,
                 [typeof(int), typeof(string), typeof(string)]);
-            AssertEqual("EnemyHp/25*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage keeps table expression");
+            AssertEqual("EnemyHp/45*2", (string?)markExpression.Invoke(null, [5, "EnemyHpPoint", "EnemyHp/25*2"]), "Mark 5 damage override");
             AssertEqual("NpcGroup*50000", (string?)markExpression.Invoke(null, [5, "NpcGroupPoint", "NpcGroup*50000*2"]), "Mark 5 wave override");
             AssertEqual("Hp*200", (string?)markExpression.Invoke(null, [5, "MyHpPoint", "Hp*200*2"]), "Mark 5 HP override");
             AssertEqual("EnemyHp/100", (string?)markExpression.Invoke(null, [3, "EnemyHpPoint", "EnemyHp/100"]), "Mark 3 keeps table expression");
@@ -239,6 +242,38 @@ namespace AscNet.Test
                 throw new InvalidDataException($"/warzone zones plasma boss listed a Duo zone:\n{plasmaBossZones}");
             _ = Run("warzone", "zone", "auto");
             AssertEqual(0, player.SimulatedBattlefield.ArenaZoneOverrideAreaId, "/warzone zone auto still clears the selection");
+
+            // /warzone dmg: local, per-install percent on the damage expression, stored in a temp file (never the real one).
+            string localSettings = ArenaLocalScoreSettings.FilePath;
+            MethodInfo evaluate = RequiredMethod(arenaModule, "Evaluate", BindingFlags.Static | BindingFlags.NonPublic,
+                [typeof(string), typeof(Dictionary<string, double>), typeof(int)]);
+            int Points(string? expression, double damage) =>
+                (int)evaluate.Invoke(null, [expression, new Dictionary<string, double> { ["EnemyHp"] = damage }, 0])!;
+            string? Expression(int markId, string tableExpression) => (string?)markExpression.Invoke(null, [markId, "EnemyHpPoint", tableExpression]);
+            AssertContains("Boss (Mark 5): 100% (default), EnemyHp/45*2, 44,444 pts", Run("warzone", "dmg"), "/warzone dmg shows defaults");
+            AssertContains("Damage score set to 120% for Boss (Mark 5)", Run("wz", "dmg", "120", "boss"), "/wz dmg 120 boss");
+            AssertEqual(true, File.Exists(localSettings), "/warzone dmg writes the local settings file");
+            AssertEqual("EnemyHp/45*2*120/100", Expression(5, "EnemyHp/25*2"), "Mark 5 damage scaled to 120%");
+            AssertEqual(53_333, Points(Expression(5, "EnemyHp/25*2"), 1_000_000), "120% of 1M damage on Mark 5");
+            AssertEqual(46_666, Points(Expression(5, "EnemyHp/25*2"), 875_000), "120% of 875k damage on Mark 5");
+            AssertEqual("EnemyHp/100", Expression(3, "EnemyHp/100"), "Mark 3 untouched by a boss-only percent");
+            _ = Run("warzone", "dmg", "50%");
+            AssertEqual("EnemyHp/100*50/100", Expression(3, "EnemyHp/100"), "percent without a mode applies to Mark 3");
+            AssertEqual("EnemyHp/50*50/100", Expression(4, "EnemyHp/50"), "percent without a mode applies to Mark 4");
+            AssertEqual("EnemyHp/45*2*50/100", Expression(5, "EnemyHp/25*2"), "percent without a mode replaces the Mark 5 value");
+            AssertContains("not scored by damage", Run("warzone", "dmg", "120", "1"), "kill-ratio Mark 1 is rejected");
+            AssertContains("Percent must be", Run("warzone", "dmg", "0"), "0% is rejected");
+            _ = Run("warzone", "dmg", "reset", "duo");
+            AssertEqual("EnemyHp/50", Expression(4, "EnemyHp/50"), "/warzone dmg reset duo restores Mark 4");
+            AssertEqual("EnemyHp/100*50/100", Expression(3, "EnemyHp/100"), "/warzone dmg reset duo keeps Mark 3");
+            _ = Run("warzone", "dmg", "reset");
+            AssertEqual("EnemyHp/45*2", Expression(5, "EnemyHp/25*2"), "/warzone dmg reset restores Mark 5");
+            AssertEqual(false, File.Exists(localSettings), "/warzone dmg reset removes the empty local settings file");
+            File.WriteAllText(localSettings, "{ broken");
+            AssertEqual("EnemyHp/45*2", Expression(5, "EnemyHp/25*2"), "an unreadable local file is ignored");
+            AssertContains("could not be read", Run("warzone", "dmg"), "/warzone dmg reports an unreadable local file");
+            _ = Run("warzone", "dmg", "reset");
+            AssertEqual(false, File.Exists(localSettings), "/warzone dmg reset removes an unreadable local file");
             Console.WriteLine("Warzone zone command compatibility passed.");
         }
     }
